@@ -140,3 +140,35 @@ def test_not_between_skips_nulls(table):
 def test_in_between_errors(table, expr, message):
     with pytest.raises(ExprError, match=message):
         compile_filter(expr, table)
+
+
+def test_regex_match(table):
+    assert names(table, "name =~ '^[A-C]'") == ["Alice", "Bob", "Chloe"]
+    assert names(table, "note=~'^[Tt]ea'") == ["Chloe"]
+    assert names(table, "city =~ ' '") == ["Emma"]
+
+
+def test_regex_is_case_sensitive_unless_flagged(table):
+    assert names(table, "note =~ tea") == ["Alice"]
+    assert names(table, "note =~ '(?i)tea'") == ["Alice", "Chloe"]
+
+
+def test_regex_on_numeric_column_uses_cell_text(table):
+    assert names(table, "age =~ '^[0-9]$'") == ["Emma"]
+    assert names(table, "joined =~ '^2023-'") == ["Alice", "Emma"]
+
+
+def test_regex_skips_nulls_and_combines(table):
+    assert names(table, "note =~ '.*'") == ["Alice", "Chloe", "Emma"]
+    assert names(table, "not name =~ 'e$' and city=Paris") == []
+    assert names(table, "name =~ 'e$' or city in (Lyon)") == ["Alice", "Bob", "Chloe"]
+
+
+def test_regex_does_not_break_existing_operators(table):
+    assert names(table, "city=Lyon") == ["Bob"]
+    assert names(table, "note!~tea") == ["Emma"]
+
+
+def test_bad_regex_error(table):
+    with pytest.raises(ExprError, match=r"bad regular expression '\(' for 'name'"):
+        compile_filter("name =~ '('", table)

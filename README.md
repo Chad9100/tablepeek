@@ -181,13 +181,14 @@ city=Lyon or (city=Paris and not age>=40)
 joined>=2024-01-01
 note~urgent            # case-insensitive "contains"
 note!~draft            # does not contain
+name=~'^[A-C]'         # regular expression (case-sensitive; '(?i)...' to ignore case)
 email is null          # also: is not null
 city in (Paris, Lyon)  # any of the listed values; also: not in
 age between 20 and 30  # inclusive at both ends; also: not between
 city='New York'        # quote values with spaces or operator characters
 ```
 
-- Operators: `=` (or `==`), `!=`, `>`, `>=`, `<`, `<=`, `~`, `!~`, plus
+- Operators: `=` (or `==`), `!=`, `>`, `>=`, `<`, `<=`, `~`, `!~`, `=~`, plus
   `in (...)` and `between ... and ...` (each with an optional `not`). They
   compare by type like `=` and `>=`/`<=`, so `age in (9, 34)` is numeric and
   `joined between 2023-01-01 and 2023-12-31` is chronological. Quote list
@@ -198,6 +199,9 @@ city='New York'        # quote values with spaces or operator characters
   9 is less than 30), `joined>=2024-01-01` is chronological, `active=yes`
   matches `yes`/`true` in a bool column. Text compares exactly; use `~` for
   a case-insensitive match.
+- `=~` uses Python regular-expression syntax and matches anywhere in the
+  cell's text, whatever the column type (`joined=~'^2023-'`). Quote patterns
+  that contain spaces, parentheses or `=!<>~`; negate with `not`.
 - A null cell never matches a comparison (`age!=34` and `age not in (34)`
   skip rows with no age); test for it with `is null`.
 - Column names match exactly first, then case-insensitively; quote names
@@ -227,7 +231,7 @@ city='New York'        # quote values with spaces or operator characters
 - Type inference (int/float/date/bool/text) with null counts
 - Per-column count, nulls, distinct, min, max and mean
 - Filter expressions with typed comparisons, `and`/`or`/`not`, parentheses,
-  contains, `in` lists, `between` ranges and null tests
+  contains, regular expressions, `in` lists, `between` ranges and null tests
 - Stable multi-key sort by typed values, nulls last, per-key `:desc`
 - Output as an aligned table, CSV, JSON (typed values) or JSON Lines
 - Auto-detected encoding and delimiter; stdin support

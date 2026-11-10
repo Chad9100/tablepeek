@@ -17,7 +17,7 @@ Estimates are rough working hours for one person.
 ## v0.2: richer expressions (about 4 h)
 
 - [x] `city in (Paris, Lyon)` and `age between 20 and 30`
-- [ ] Regular-expression match operator (`=~`)
+- [x] Regular-expression match operator (`=~`)
 - [ ] Column-to-column comparisons (`end > start`)
 - [ ] Error messages that point at the position in the expression
 

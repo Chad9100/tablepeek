@@ -8,11 +8,13 @@ Grammar (keywords are case-insensitive)::
     comparison := COLUMN OP VALUE | COLUMN "is" ["not"] "null"
                 | COLUMN ["not"] "in" "(" VALUE ("," VALUE)* ")"
                 | COLUMN ["not"] "between" VALUE "and" VALUE
-    OP         := = | == | != | > | >= | < | <= | ~ | !~
+    OP         := = | == | != | > | >= | < | <= | ~ | !~ | =~
 
 ``~`` is a case-insensitive "contains"; ``!~`` its negation. Columns and
 values may be quoted with '...' or "..." (needed for spaces or operator
-characters). Values compare by the column's inferred type, so ``age>9`` is
+characters). ``=~`` matches a Python regular expression anywhere in the
+cell's text (case-sensitive; prefix the pattern with ``(?i)`` to ignore
+case). Values compare by the column's inferred type, so ``age>9`` is
 numeric and ``date>=2024-01-01`` is chronological. A null cell never matches
 a comparison; use ``is null`` / ``is not null`` to test for it.
 ``in`` matches any listed value and ``between`` is inclusive at both ends;
@@ -34,7 +36,7 @@ _TOKEN_RE = re.compile(
     \s*(?:
         (?P<lparen>\() |
         (?P<rparen>\)) |
-        (?P<op>>=|<=|!=|==|!~|=|>|<|~) |
+        (?P<op>>=|<=|!=|=~|==|!~|=|>|<|~) |
         '(?P<sq>[^']*)' |
         "(?P<dq>[^"]*)" |
         (?P<word>[^\s()=!<>~'"]+)
@@ -234,6 +236,13 @@ _ORDER_OPS = {
 def _compare(table: Table, idx: int, op: str, raw: str) -> Predicate:
     name = table.columns[idx]
     kind = table.kinds[idx]
+
+    if op == "=~":
+        try:
+            pattern = re.compile(raw)
+        except re.error as exc:
+            raise ExprError(f"bad regular expression {raw!r} for {name!r}: {exc}") from None
+        return lambda row: (not is_null(row[idx])) and pattern.search(row[idx]) is not None
 
     if op in ("~", "!~"):
         needle = raw.lower()
