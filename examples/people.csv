@@ -1,0 +1,9 @@
+name,age,city,joined,active,score
+Alice,34,Paris,2023-04-12,yes,88.5
+Bob,27,Lyon,2022-11-03,no,72
+Chloe,41,Paris,2021-06-30,yes,91.25
+David,,Berlin,2024-01-15,yes,
+Emma,30,Paris,2023-09-01,no,79
+Farid,52,Marseille,2020-02-20,yes,65.5
+Giulia,38,Rome,2022-07-14,yes,84
+Hugo,29,Lyon,NA,no,70

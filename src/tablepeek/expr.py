@@ -1,0 +1,209 @@
+"""Filter expressions such as ``age>30 and city=Paris``.
+
+Grammar (keywords are case-insensitive)::
+
+    expr       := and_expr ("or" and_expr)*
+    and_expr   := not_expr ("and" not_expr)*
+    not_expr   := "not" not_expr | "(" expr ")" | comparison
+    comparison := COLUMN OP VALUE | COLUMN "is" ["not"] "null"
+    OP         := = | == | != | > | >= | < | <= | ~ | !~
+
+``~`` is a case-insensitive "contains"; ``!~`` its negation. Columns and
+values may be quoted with '...' or "..." (needed for spaces or operator
+characters). Values compare by the column's inferred type, so ``age>9`` is
+numeric and ``date>=2024-01-01`` is chronological. A null cell never matches
+a comparison; use ``is null`` / ``is not null`` to test for it.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Callable
+
+from tablepeek.infer import convert, is_null
+from tablepeek.table import Table, TableError
+
+Predicate = Callable[[list[str]], bool]
+
+_TOKEN_RE = re.compile(
+    r"""
+    \s*(?:
+        (?P<lparen>\() |
+        (?P<rparen>\)) |
+        (?P<op>>=|<=|!=|==|!~|=|>|<|~) |
+        '(?P<sq>[^']*)' |
+        "(?P<dq>[^"]*)" |
+        (?P<word>[^\s()=!<>~'"]+)
+    )""",
+    re.VERBOSE,
+)
+
+
+class ExprError(TableError):
+    """The filter expression is malformed or does not fit the table."""
+
+
+class _Tok:
+    __slots__ = ("kind", "text", "pos")
+
+    def __init__(self, kind: str, text: str, pos: int):
+        self.kind, self.text, self.pos = kind, text, pos
+
+    def keyword(self, *words: str) -> bool:
+        return self.kind == "word" and self.text.lower() in words
+
+
+def tokenize(source: str) -> list[_Tok]:
+    tokens: list[_Tok] = []
+    pos = 0
+    while pos < len(source):
+        if source[pos:].strip() == "":
+            break
+        m = _TOKEN_RE.match(source, pos)
+        if not m or m.end() == pos:
+            snippet = source[pos:].strip()
+            if snippet[:1] in "'\"":
+                raise ExprError(f"unterminated quote in filter: {snippet}")
+            raise ExprError(f"unexpected character in filter at: {snippet}")
+        kind = m.lastgroup
+        start = m.start(kind)
+        if kind in ("sq", "dq"):
+            tokens.append(_Tok("str", m.group(kind), start))
+        else:
+            tokens.append(_Tok(kind, m.group(kind), start))
+        pos = m.end()
+    return tokens
+
+
+class _Parser:
+    def __init__(self, source: str, table: Table):
+        self.source = source
+        self.tokens = tokenize(source)
+        self.i = 0
+        self.table = table
+
+    def peek(self) -> _Tok | None:
+        return self.tokens[self.i] if self.i < len(self.tokens) else None
+
+    def take(self) -> _Tok:
+        tok = self.peek()
+        if tok is None:
+            raise ExprError(f"filter ends too early: {self.source!r}")
+        self.i += 1
+        return tok
+
+    def parse(self) -> Predicate:
+        if not self.tokens:
+            raise ExprError("empty filter expression")
+        pred = self.or_expr()
+        tok = self.peek()
+        if tok is not None:
+            raise ExprError(f"unexpected {tok.text!r} in filter (missing 'and'/'or'?)")
+        return pred
+
+    def or_expr(self) -> Predicate:
+        parts = [self.and_expr()]
+        while (tok := self.peek()) is not None and tok.keyword("or"):
+            self.take()
+            parts.append(self.and_expr())
+        if len(parts) == 1:
+            return parts[0]
+        return lambda row: any(p(row) for p in parts)
+
+    def and_expr(self) -> Predicate:
+        parts = [self.not_expr()]
+        while (tok := self.peek()) is not None and tok.keyword("and"):
+            self.take()
+            parts.append(self.not_expr())
+        if len(parts) == 1:
+            return parts[0]
+        return lambda row: all(p(row) for p in parts)
+
+    def not_expr(self) -> Predicate:
+        tok = self.peek()
+        if tok is not None and tok.keyword("not"):
+            self.take()
+            inner = self.not_expr()
+            return lambda row: not inner(row)
+        if tok is not None and tok.kind == "lparen":
+            self.take()
+            inner = self.or_expr()
+            close = self.take()
+            if close.kind != "rparen":
+                raise ExprError(f"expected ')' but found {close.text!r}")
+            return inner
+        return self.comparison()
+
+    def comparison(self) -> Predicate:
+        col_tok = self.take()
+        if col_tok.kind not in ("word", "str"):
+            raise ExprError(f"expected a column name but found {col_tok.text!r}")
+        idx = self.table.resolve(col_tok.text)
+        op_tok = self.take()
+        if op_tok.keyword("is"):
+            negate = False
+            nxt = self.take()
+            if nxt.keyword("not"):
+                negate = True
+                nxt = self.take()
+            if not nxt.keyword("null", "empty"):
+                raise ExprError(f"expected 'null' after 'is' but found {nxt.text!r}")
+            return lambda row: is_null(row[idx]) != negate
+        if op_tok.kind != "op":
+            raise ExprError(
+                f"expected an operator after {col_tok.text!r} but found {op_tok.text!r}"
+            )
+        val_tok = self.take()
+        if val_tok.kind not in ("word", "str"):
+            raise ExprError(f"expected a value after {op_tok.text!r} but found {val_tok.text!r}")
+        return _compare(self.table, idx, op_tok.text, val_tok.text)
+
+
+_ORDER_OPS = {
+    "=": lambda a, b: a == b,
+    "==": lambda a, b: a == b,
+    "!=": lambda a, b: a != b,
+    ">": lambda a, b: a > b,
+    ">=": lambda a, b: a >= b,
+    "<": lambda a, b: a < b,
+    "<=": lambda a, b: a <= b,
+}
+
+
+def _compare(table: Table, idx: int, op: str, raw: str) -> Predicate:
+    name = table.columns[idx]
+    kind = table.kinds[idx]
+
+    if op in ("~", "!~"):
+        needle = raw.lower()
+        want = op == "~"
+        return lambda row: (not is_null(row[idx])) and ((needle in row[idx].lower()) == want)
+
+    fn = _ORDER_OPS[op]
+    if kind == "text":
+        return lambda row: (not is_null(row[idx])) and fn(row[idx].strip(), raw)
+
+    target_kind = "float" if kind in ("int", "float") else kind
+    try:
+        target = convert(raw, target_kind)
+    except ValueError:
+        target = None
+    if target is None:
+        if op in ("=", "==", "!="):
+            # e.g. qty=unknown on a numeric column: compare the raw text.
+            return lambda row: (not is_null(row[idx])) and fn(row[idx].strip(), raw)
+        raise ExprError(f"cannot compare {kind} column {name!r} with {raw!r}")
+
+    def pred(row: list[str]) -> bool:
+        try:
+            value = convert(row[idx], kind)
+        except ValueError:
+            return False
+        return value is not None and fn(value, target)
+
+    return pred
+
+
+def compile_filter(source: str, table: Table) -> Predicate:
+    """Compile ``source`` into a predicate over the rows of ``table``."""
+    return _Parser(source, table).parse()
