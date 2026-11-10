@@ -172,6 +172,24 @@ def test_skip_preamble_lines(tmp_path, capsys):
     assert out.splitlines() == ["name,age", "Ann,30"]
 
 
+def test_custom_null_tokens(tmp_path, capsys):
+    p = tmp_path / "dash.csv"
+    p.write_text("name,age,score\nAnn,30,-\nBob,-,?\nCy,25,8\n", encoding="utf-8")
+    code, out, _ = run(capsys, "schema", str(p), "--null", "-", "--null", "?", "-f", "jsonl")
+    assert code == 0
+    recs = [json.loads(line) for line in out.splitlines()]
+    assert [r["type"] for r in recs] == ["text", "int", "int"]
+    code, out, _ = run(capsys, "filter", str(p), "age is null", "--null", "-", "-f", "csv")
+    assert out.splitlines() == ["name,age,score", "Bob,,?"]
+
+
+def test_without_null_option_dash_is_text(tmp_path, capsys):
+    p = tmp_path / "dash.csv"
+    p.write_text("n,v\na,-\nb,2\n", encoding="utf-8")
+    code, out, _ = run(capsys, "schema", str(p), "-f", "jsonl")
+    assert json.loads(out.splitlines()[1])["type"] == "text"
+
+
 def test_skip_too_many_lines_is_an_error(people, capsys):
     code, _, err = run(capsys, "head", people, "--skip", "99")
     assert code == 2

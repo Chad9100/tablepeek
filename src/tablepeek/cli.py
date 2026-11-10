@@ -46,6 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="ignore the first N lines (preamble before the header)",
     )
     common.add_argument(
+        "--null", action="append", default=[], metavar="TOKEN", dest="null_tokens",
+        help="also treat TOKEN (e.g. -) as a null value; repeatable",
+    )
+    common.add_argument(
         "-f", "--format", choices=FORMATS, default="table",
         help="output format (default: table)",
     )
@@ -105,6 +109,7 @@ def _load(args) -> Table:
         encoding=args.encoding,
         header=not args.no_header,
         skip=args.skip,
+        null_tokens=args.null_tokens,
     )
     if table.long_rows:
         _warn(f"{table.long_rows} row(s) had more fields than the header; extra fields ignored")

@@ -12,6 +12,7 @@ import io
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Sequence
 
 CANDIDATE_DELIMITERS = [",", "\t", ";", "|"]
 DELIMITER_NAMES = {",": "comma", "\t": "tab", ";": "semicolon", "|": "pipe"}
@@ -179,8 +180,14 @@ def parse_text(
     header: bool = True,
     encoding: str = "utf-8",
     source: str = "<stdin>",
+    null_tokens: Sequence[str] = (),
 ) -> Table:
-    """Parse decoded text into a Table. Blank lines are skipped."""
+    """Parse decoded text into a Table. Blank lines are skipped.
+
+    Cells equal (after trimming) to one of ``null_tokens`` become empty
+    strings, so every later stage sees them as nulls.
+    """
+    extra = frozenset(null_tokens)
     reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
     records: list[list[str]] = []
     try:
@@ -208,6 +215,8 @@ def parse_text(
             if any(cell.strip() for cell in row[width:]):
                 table.long_rows += 1
             row = row[:width]
+        if extra:
+            row = ["" if cell.strip() in extra else cell for cell in row]
         table.rows.append(row)
     return table
 
@@ -219,6 +228,7 @@ def load(
     header: bool = True,
     stdin=None,
     skip: int = 0,
+    null_tokens: Sequence[str] = (),
 ) -> Table:
     """Read ``path`` (``-`` for stdin) into a Table."""
     if path == "-":
@@ -247,4 +257,5 @@ def load(
         delim = sniff_delimiter(text, preferred)
     else:
         delim = parse_delimiter(delimiter)
-    return parse_text(text, delim, header=header, encoding=used, source=source)
+    return parse_text(text, delim, header=header, encoding=used, source=source,
+                      null_tokens=null_tokens)

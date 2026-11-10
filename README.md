@@ -41,6 +41,7 @@ tablepeek select FILE COLS
 | `-e, --encoding E` | text encoding; default is auto-detect |
 | `--no-header` | the first line is data; columns become `col1`, `col2`, ... |
 | `--skip N` | ignore the first N lines, for files with a preamble before the header |
+| `--null TOKEN` | also treat cells equal to TOKEN (for example `-` or `?`) as null; repeat for several tokens. Matching nulls show as empty cells |
 | `-f, --format F` | `table` (default), `csv`, `json` or `jsonl` |
 | `--max-width N` | clip table cells wider than N characters (default 40, `0` = never) |
 

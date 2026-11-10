@@ -27,7 +27,7 @@ Estimates are rough working hours for one person.
       switch, and detection when the column is unambiguous
 - [ ] Thousands separators and decimal commas (`1.234,5`) for European files
 - [x] `--skip N` for files with preamble lines before the header
-- [ ] Custom null tokens (`--null -`)
+- [x] Custom null tokens (`--null -`)
 
 ## v0.4: large files (about 5 h)
 
