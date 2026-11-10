@@ -6,6 +6,8 @@ Grammar (keywords are case-insensitive)::
     and_expr   := not_expr ("and" not_expr)*
     not_expr   := "not" not_expr | "(" expr ")" | comparison
     comparison := COLUMN OP VALUE | COLUMN "is" ["not"] "null"
+                | COLUMN ["not"] "in" "(" VALUE ("," VALUE)* ")"
+                | COLUMN ["not"] "between" VALUE "and" VALUE
     OP         := = | == | != | > | >= | < | <= | ~ | !~
 
 ``~`` is a case-insensitive "contains"; ``!~`` its negation. Columns and
@@ -13,6 +15,8 @@ values may be quoted with '...' or "..." (needed for spaces or operator
 characters). Values compare by the column's inferred type, so ``age>9`` is
 numeric and ``date>=2024-01-01`` is chronological. A null cell never matches
 a comparison; use ``is null`` / ``is not null`` to test for it.
+``in`` matches any listed value and ``between`` is inclusive at both ends;
+both use the same typed comparison as ``=`` and ``>=``/``<=``.
 """
 
 from __future__ import annotations
@@ -149,6 +153,18 @@ class _Parser:
             if not nxt.keyword("null", "empty"):
                 raise ExprError(f"expected 'null' after 'is' but found {nxt.text!r}")
             return lambda row: is_null(row[idx]) != negate
+        negate = False
+        if op_tok.keyword("not"):
+            negate = True
+            op_tok = self.take()
+            if not op_tok.keyword("in", "between"):
+                raise ExprError(
+                    f"expected 'in' or 'between' after 'not' but found {op_tok.text!r}"
+                )
+        if op_tok.keyword("in"):
+            return self.in_list(idx, negate)
+        if op_tok.keyword("between"):
+            return self.between(idx, negate)
         if op_tok.kind != "op":
             raise ExprError(
                 f"expected an operator after {col_tok.text!r} but found {op_tok.text!r}"
@@ -157,6 +173,51 @@ class _Parser:
         if val_tok.kind not in ("word", "str"):
             raise ExprError(f"expected a value after {op_tok.text!r} but found {val_tok.text!r}")
         return _compare(self.table, idx, op_tok.text, val_tok.text)
+
+    def value(self, after: str) -> str:
+        tok = self.take()
+        if tok.kind not in ("word", "str"):
+            raise ExprError(f"expected a value after {after!r} but found {tok.text!r}")
+        return tok.text
+
+    def in_list(self, idx: int, negate: bool) -> Predicate:
+        open_tok = self.take()
+        if open_tok.kind != "lparen":
+            raise ExprError(f"expected '(' after 'in' but found {open_tok.text!r}")
+        values: list[str] = []
+        while True:
+            tok = self.take()
+            if tok.kind == "rparen":
+                break
+            if tok.kind == "str":
+                values.append(tok.text)
+            elif tok.kind == "word":
+                # Commas are not separate tokens: "Paris," and "a,b" split here.
+                values.extend(v for v in tok.text.split(",") if v)
+            else:
+                raise ExprError(f"unexpected {tok.text!r} in 'in' list")
+        if not values:
+            raise ExprError("empty 'in' list")
+        if negate:
+            # Each != predicate already rejects nulls, like != on its own.
+            preds = [_compare(self.table, idx, "!=", v) for v in values]
+            return lambda row: all(p(row) for p in preds)
+        preds = [_compare(self.table, idx, "=", v) for v in values]
+        return lambda row: any(p(row) for p in preds)
+
+    def between(self, idx: int, negate: bool) -> Predicate:
+        low = self.value("between")
+        and_tok = self.take()
+        if not and_tok.keyword("and"):
+            raise ExprError(f"expected 'and' after {low!r} but found {and_tok.text!r}")
+        high = self.value("and")
+        ge = _compare(self.table, idx, ">=", low)
+        le = _compare(self.table, idx, "<=", high)
+        if negate:
+            lt = _compare(self.table, idx, "<", low)
+            gt = _compare(self.table, idx, ">", high)
+            return lambda row: lt(row) or gt(row)
+        return lambda row: ge(row) and le(row)
 
 
 _ORDER_OPS = {

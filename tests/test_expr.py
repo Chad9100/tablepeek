@@ -93,3 +93,50 @@ def test_errors(table, expr, message):
 def test_unknown_column_error(table):
     with pytest.raises(TableError, match="unknown column 'salary'"):
         compile_filter("salary>10", table)
+
+
+def test_in_list(table):
+    assert names(table, "city in (Paris, Lyon)") == ["Alice", "Bob", "Chloe"]
+    assert names(table, "city in (Lyon,Berlin)") == ["Bob", "David"]
+    assert names(table, "city IN ('New York', Lyon)") == ["Bob", "Emma"]
+
+
+def test_in_list_is_typed(table):
+    assert names(table, "age in (34.0, 9)") == ["Alice", "Emma"]
+    assert names(table, "active in (true)") == ["Alice", "Chloe", "David"]
+
+
+def test_not_in_skips_nulls(table):
+    assert names(table, "age not in (34, 27)") == ["Chloe", "Emma"]
+    assert names(table, "not city in (Paris)") == ["Bob", "David", "Emma"]
+
+
+def test_between_is_inclusive_and_typed(table):
+    assert names(table, "age between 9 and 34") == ["Alice", "Bob", "Emma"]
+    assert names(table, "joined between 2022-01-01 and 2023-06-30") == ["Alice", "Bob"]
+
+
+def test_between_combines_with_and(table):
+    assert names(table, "age between 20 and 40 and city=Paris") == ["Alice"]
+    assert names(table, "city=Berlin or age between 40 and 50") == ["Chloe", "David"]
+
+
+def test_not_between_skips_nulls(table):
+    assert names(table, "age not between 10 and 40") == ["Chloe", "Emma"]
+
+
+@pytest.mark.parametrize(
+    "expr, message",
+    [
+        ("city in Paris", "found 'Paris'"),
+        ("city in ()", "empty 'in' list"),
+        ("city in (Paris", "ends too early"),
+        ("age between 1 30", "expected 'and'"),
+        ("age between 1 and", "ends too early"),
+        ("age between 1 and x", "cannot compare int column 'age'"),
+        ("age not 30", "expected 'in' or 'between'"),
+    ],
+)
+def test_in_between_errors(table, expr, message):
+    with pytest.raises(ExprError, match=message):
+        compile_filter(expr, table)
