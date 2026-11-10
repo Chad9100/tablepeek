@@ -11,7 +11,7 @@ from tablepeek import __version__
 from tablepeek.expr import compile_filter
 from tablepeek.ops import parse_sort_spec, schema, sort_rows, stats
 from tablepeek.render import FORMATS, format_value, render_rows, render_summary
-from tablepeek.table import DELIMITER_NAMES, Table, TableError, load
+from tablepeek.table import DELIMITER_NAMES, Table, TableError, load, parse_delimiter
 
 PROG = "tablepeek"
 
@@ -52,6 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "-f", "--format", choices=FORMATS, default="table",
         help="output format (default: table)",
+    )
+    common.add_argument(
+        "--out-delimiter", metavar="C", default=",",
+        help="delimiter for -f csv output (default: comma; accepts tab, semicolon, pipe)",
     )
     common.add_argument(
         "--max-width", type=_positive_int, default=40, metavar="N",
@@ -142,7 +146,9 @@ def _rows_command(args, table: Table) -> str:
     columns = [table.columns[i] for i in indices]
     kinds = [table.kinds[i] for i in indices]
     out_rows = [[r[i] for i in indices] for r in rows]
-    return render_rows(args.format, columns, out_rows, kinds, args.max_width)
+    return render_rows(
+        args.format, columns, out_rows, kinds, args.max_width, parse_delimiter(args.out_delimiter)
+    )
 
 
 def _describe(table: Table) -> str:
@@ -167,7 +173,10 @@ def _schema_command(args, table: Table) -> str:
         }
         return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
     records = [{"#": i, **rec} for i, rec in enumerate(columns, start=1)]
-    body = render_summary(args.format, records, ("#", "non_null", "nulls"), args.max_width)
+    body = render_summary(
+        args.format, records, ("#", "non_null", "nulls"), args.max_width,
+        parse_delimiter(args.out_delimiter),
+    )
     return _describe(table) + body if args.format == "table" else body
 
 
@@ -189,7 +198,9 @@ def _stats_command(args, table: Table) -> str:
             k for k in ("min", "max")
             if records and all(r["type"] in ("int", "float") for r in records)
         )
-    return render_summary(args.format, records, right, args.max_width)
+    return render_summary(
+        args.format, records, right, args.max_width, parse_delimiter(args.out_delimiter)
+    )
 
 
 def _write(text: str) -> None:

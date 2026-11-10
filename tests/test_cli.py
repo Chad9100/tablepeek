@@ -38,6 +38,33 @@ def test_head_default_and_limit(people, capsys):
     assert len(out.splitlines()) == 4
 
 
+def test_markdown_output(people, capsys):
+    code, out, _ = run(capsys, "select", people, "name,age", "-n", "2", "-f", "md")
+    assert code == 0
+    assert out.splitlines() == [
+        "| name | age |",
+        "| --- | ---: |",
+        "| Alice | 34 |",
+        "| Bob | 27 |",
+    ]
+
+
+def test_out_delimiter_tab_and_semicolon(people, capsys):
+    code, out, _ = run(
+        capsys, "select", people, "name,age", "-n", "1", "-f", "csv", "--out-delimiter", "tab"
+    )
+    assert code == 0 and out == "name\tage\nAlice\t34\n"
+    _, out, _ = run(
+        capsys, "select", people, "name,age", "-n", "1", "-f", "csv", "--out-delimiter", ";"
+    )
+    assert out == "name;age\nAlice;34\n"
+
+
+def test_out_delimiter_must_be_one_character(people, capsys):
+    code, _, err = run(capsys, "head", people, "-f", "csv", "--out-delimiter", "ab")
+    assert code == 2 and "single character" in err
+
+
 def test_schema_table_has_summary_line(people, capsys):
     code, out, _ = run(capsys, "schema", people)
     assert code == 0

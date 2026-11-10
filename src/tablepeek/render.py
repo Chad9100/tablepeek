@@ -1,4 +1,4 @@
-"""Output formats: aligned table, CSV, JSON and JSON Lines."""
+"""Output formats: aligned table, CSV, Markdown, JSON and JSON Lines."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from datetime import datetime
 
 from tablepeek.infer import convert
 
-FORMATS = ("table", "csv", "json", "jsonl")
+FORMATS = ("table", "csv", "md", "json", "jsonl")
 NUMERIC = ("int", "float")
 
 
@@ -72,6 +72,24 @@ def render_table(
     return "\n".join(out) + "\n"
 
 
+def _md_cell(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\n", "<br>").replace("\t", " ")
+    return text.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def render_markdown(
+    columns: list[str], rows: list[list[str]], right: list[bool] | None = None
+) -> str:
+    """Render rows as a GitHub-flavoured Markdown table (numbers right-aligned)."""
+    right = right or [False] * len(columns)
+    head = "| " + " | ".join(_md_cell(c) for c in columns) + " |"
+    rule = "| " + " | ".join("---:" if r else "---" for r in right) + " |"
+    out = [head, rule]
+    for row in rows:
+        out.append("| " + " | ".join(_md_cell(c) for c in row) + " |")
+    return "\n".join(out) + "\n"
+
+
 def render_csv(columns: list[str], rows: list[list[str]], delimiter: str = ",") -> str:
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=delimiter, lineterminator="\n")
@@ -100,12 +118,15 @@ def render_rows(
     rows: list[list[str]],
     kinds: list[str],
     max_width: int = 40,
+    delimiter: str = ",",
 ) -> str:
     """Render table rows in any of FORMATS."""
     if fmt == "table":
         return render_table(columns, rows, [k in NUMERIC for k in kinds], max_width)
     if fmt == "csv":
-        return render_csv(columns, rows)
+        return render_csv(columns, rows, delimiter)
+    if fmt == "md":
+        return render_markdown(columns, rows, [k in NUMERIC for k in kinds])
     records = typed_records(columns, rows, kinds)
     return render_records_json(fmt, records)
 
@@ -122,6 +143,7 @@ def render_summary(
     records: list[dict],
     right_cols: tuple[str, ...] = (),
     max_width: int = 40,
+    delimiter: str = ",",
 ) -> str:
     """Render summary records (schema, stats) in any of FORMATS."""
     if fmt in ("json", "jsonl"):
@@ -129,5 +151,7 @@ def render_summary(
     columns = list(records[0].keys()) if records else []
     rows = [[format_value(r[c]) for c in columns] for r in records]
     if fmt == "csv":
-        return render_csv(columns, rows)
+        return render_csv(columns, rows, delimiter)
+    if fmt == "md":
+        return render_markdown(columns, rows, [c in right_cols for c in columns])
     return render_table(columns, rows, [c in right_cols for c in columns], max_width)

@@ -42,7 +42,8 @@ tablepeek select FILE COLS
 | `--no-header` | the first line is data; columns become `col1`, `col2`, ... |
 | `--skip N` | ignore the first N lines, for files with a preamble before the header |
 | `--null TOKEN` | also treat cells equal to TOKEN (for example `-` or `?`) as null; repeat for several tokens. Matching nulls show as empty cells |
-| `-f, --format F` | `table` (default), `csv`, `json` or `jsonl` |
+| `-f, --format F` | `table` (default), `csv`, `md` (Markdown table), `json` or `jsonl` |
+| `--out-delimiter C` | delimiter for `-f csv` output (default comma; `tab`, `semicolon`, `pipe` also accepted) |
 | `--max-width N` | clip table cells wider than N characters (default 40, `0` = never) |
 
 The row commands (`head`, `filter`, `sort`, `select`) share these options, so
@@ -200,6 +201,13 @@ name,city
 Alice,Paris
 Bob,Lyon
 
+$ tablepeek select examples/people.csv name,city,score -w "score>=80" -f md
+| name | city | score |
+| --- | --- | ---: |
+| Alice | Paris | 88.5 |
+| Chloe | Paris | 91.25 |
+| Giulia | Rome | 84 |
+
 $ tablepeek filter examples/people.csv "salary>1"
 tablepeek: error: unknown column 'salary' (columns: name, age, city, joined, active, score)
   salary>1
@@ -294,7 +302,8 @@ city='New York'        # quote values with spaces or operator characters
   contains, regular expressions, `in` lists, `between` ranges, column-to-column
   comparisons and null tests; errors point at the offending spot
 - Stable multi-key sort by typed values, nulls last, per-key `:desc`
-- Output as an aligned table, CSV, JSON (typed values) or JSON Lines
+- Output as an aligned table, CSV (any delimiter), Markdown, JSON (typed
+  values) or JSON Lines
 - Auto-detected encoding and delimiter; stdin support
 - No dependencies; tested on Windows and Linux with Python 3.10 to 3.13
 

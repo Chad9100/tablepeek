@@ -44,7 +44,7 @@ Estimates are rough working hours for one person.
 
 ## v1.0: release (about 3 h)
 
-- [ ] `--out-delimiter` and Markdown table output
+- [x] `--out-delimiter` and Markdown table output
 - [ ] Publish to PyPI with a trusted-publishing GitHub workflow
 - [ ] Shell completion scripts and a `--help` review
 

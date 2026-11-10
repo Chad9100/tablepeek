@@ -49,6 +49,23 @@ def test_jsonl_one_object_per_line():
     assert out == '{"a": "é"}\n{"a": "2"}\n'
 
 
+def test_markdown_alignment_and_escaping():
+    out = render_rows(
+        "md", ["name", "n"], [["a|b", "5"], ["x\ny", ""]], ["text", "int"]
+    )
+    assert out.splitlines() == [
+        "| name | n |",
+        "| --- | ---: |",
+        "| a\\|b | 5 |",
+        "| x<br>y |  |",
+    ]
+
+
+def test_csv_custom_delimiter():
+    out = render_csv(["a", "b"], [["x;y", "z"]], ";")
+    assert out == 'a;b\n"x;y";z\n'
+
+
 def test_format_value():
     assert format_value(None) == ""
     assert format_value(3.0) == "3"
