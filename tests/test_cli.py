@@ -162,3 +162,17 @@ def test_module_entry_point_reads_stdin():
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.replace(b"\r\n", b"\n") == b"n,x\n2,b\n"
+
+
+def test_skip_preamble_lines(tmp_path, capsys):
+    p = tmp_path / "report.csv"
+    p.write_text("Quarterly report\nexported 2024-01-01\nname,age\nAnn,30\nBob,25\n", encoding="utf-8")
+    code, out, _ = run(capsys, "filter", str(p), "age>26", "--skip", "2", "-f", "csv")
+    assert code == 0
+    assert out.splitlines() == ["name,age", "Ann,30"]
+
+
+def test_skip_too_many_lines_is_an_error(people, capsys):
+    code, _, err = run(capsys, "head", people, "--skip", "99")
+    assert code == 2
+    assert "--skip 99 leaves no data" in err

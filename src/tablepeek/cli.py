@@ -42,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="first line is data; columns are named col1, col2, ...",
     )
     common.add_argument(
+        "--skip", type=_positive_int, default=0, metavar="N",
+        help="ignore the first N lines (preamble before the header)",
+    )
+    common.add_argument(
         "-f", "--format", choices=FORMATS, default="table",
         help="output format (default: table)",
     )
@@ -100,6 +104,7 @@ def _load(args) -> Table:
         delimiter=args.delimiter,
         encoding=args.encoding,
         header=not args.no_header,
+        skip=args.skip,
     )
     if table.long_rows:
         _warn(f"{table.long_rows} row(s) had more fields than the header; extra fields ignored")

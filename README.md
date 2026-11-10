@@ -40,6 +40,7 @@ tablepeek select FILE COLS
 | `-d, --delimiter C` | field delimiter; default is auto-detect (`tab`, `comma`, `semicolon`, `pipe` also accepted) |
 | `-e, --encoding E` | text encoding; default is auto-detect |
 | `--no-header` | the first line is data; columns become `col1`, `col2`, ... |
+| `--skip N` | ignore the first N lines, for files with a preamble before the header |
 | `-f, --format F` | `table` (default), `csv`, `json` or `jsonl` |
 | `--max-width N` | clip table cells wider than N characters (default 40, `0` = never) |
 

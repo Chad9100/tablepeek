@@ -117,6 +117,16 @@ def decode(data: bytes, encoding: str | None = None) -> tuple[str, str]:
     return data.decode("latin-1"), "latin-1"
 
 
+def skip_lines(text: str, count: int, source: str = "<stdin>") -> str:
+    """Drop the first ``count`` physical lines (preamble before the header)."""
+    lines = text.splitlines(keepends=True)
+    if count >= len(lines):
+        raise TableError(
+            f"{source}: --skip {count} leaves no data (file has {len(lines)} lines)"
+        )
+    return "".join(lines[count:])
+
+
 def sniff_delimiter(text: str, preferred: str = ",") -> str:
     """Guess the delimiter from the first rows of ``text``.
 
@@ -208,6 +218,7 @@ def load(
     encoding: str | None = None,
     header: bool = True,
     stdin=None,
+    skip: int = 0,
 ) -> Table:
     """Read ``path`` (``-`` for stdin) into a Table."""
     if path == "-":
@@ -230,6 +241,8 @@ def load(
         source = path
         preferred = "\t" if p.suffix.lower() in (".tsv", ".tab") else ","
     text, used = decode(data, encoding)
+    if skip:
+        text = skip_lines(text, skip, source)
     if delimiter is None:
         delim = sniff_delimiter(text, preferred)
     else:
