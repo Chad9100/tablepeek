@@ -257,3 +257,66 @@ def test_mismatched_kinds_allow_text_equality():
     assert t.kinds == ["int", "text"]
     assert [r[0] for r in t.rows if compile_filter("n = @code", t)(r)] == ["2"]
     assert [r[0] for r in t.rows if compile_filter("n != @code", t)(r)] == ["1", "3"]
+
+
+def error_for(table, expr):
+    with pytest.raises(ExprError) as info:
+        compile_filter(expr, table)
+    return info.value
+
+
+@pytest.mark.parametrize(
+    "expr, marked",
+    [
+        # The text from the caret onwards must start with ``marked``.
+        ("salary>10", "salary"),
+        ("age>30 and wage<5", "wage"),
+        ("age>abc", "abc"),
+        ("age>30 city=Paris", "city"),
+        ("age 30", "30"),
+        ("age is maybe", "maybe"),
+        ("age not like 3", "like"),
+        ("(age>30 or city=Lyon", ""),
+        ("age>  ", ""),
+        ("city='Paris", "'Paris"),
+        ("age>30 & city=Paris", "& city"),
+        ("age>'x y'", "'x y'"),
+        ("age between 1 and zz", "zz"),
+        ("age between 1 or 5", "or"),
+        ("city in (Paris,@nope,Lyon)", "@nope,Lyon"),
+        ("city in (Paris, Lyon,@zip)", "@zip)"),
+        ("city in (Paris, @nope)", "@nope"),
+        ("city = @'no such'", "@'no such'"),
+        ("name=~'['", "'['"),
+        ("age > @city", "@city"),
+        ("age in ()", "()"),
+        ("(age>30 x)", "x)"),
+    ],
+)
+def test_error_position(table, expr, marked):
+    exc = error_for(table, expr)
+    assert exc.source == expr
+    assert exc.source[exc.pos:].startswith(marked)
+    if marked == "":
+        assert exc.pos == len(expr.rstrip())
+
+
+def test_error_message_draws_caret(table):
+    exc = error_for(table, "age>30 and wage<5")
+    lines = str(exc).split("\n")
+    assert lines[0].startswith("unknown column 'wage'")
+    assert lines[1] == "  age>30 and wage<5"
+    assert lines[2] == "  " + " " * 11 + "^"
+    assert exc.message == lines[0]
+
+
+def test_caret_aligns_when_expression_has_tabs(table):
+    lines = str(error_for(table, "age>1 and\tzip=3")).split("\n")
+    assert lines[1] == "  age>1 and zip=3"
+    assert lines[2].index("^") == lines[1].index("zip")
+
+
+def test_empty_expression_has_no_caret(table):
+    exc = error_for(table, "   ")
+    assert exc.pos is None
+    assert str(exc) == "empty filter expression"

@@ -26,6 +26,9 @@ column of the same row, so ``end>@start`` compares two columns. Numeric
 columns compare as numbers and two date or bool columns by their type;
 otherwise only ``=``/``!=`` (as text) and ``~``/``!~`` are allowed. Quote a
 literal value that starts with ``@``: ``handle='@bob'``.
+
+Errors raised while compiling carry the offset of the offending token, and
+their text repeats the expression with a ``^`` under that spot.
 """
 
 from __future__ import annotations
@@ -53,7 +56,26 @@ _TOKEN_RE = re.compile(
 
 
 class ExprError(TableError):
-    """The filter expression is malformed or does not fit the table."""
+    """The filter expression is malformed or does not fit the table.
+
+    When ``source`` and ``pos`` are known, ``str()`` adds the expression and
+    a caret under the offending character::
+
+        unknown column 'salary' (columns: ...)
+          salary>1
+          ^
+    """
+
+    def __init__(self, message: str, source: str | None = None, pos: int | None = None):
+        super().__init__(message)
+        self.message, self.source, self.pos = message, source, pos
+
+    def __str__(self) -> str:
+        if self.source is None or self.pos is None:
+            return self.message
+        # Tabs and newlines would misalign the caret; show them as spaces.
+        shown = re.sub(r"\s", " ", self.source)
+        return f"{self.message}\n  {shown}\n  {' ' * self.pos}^"
 
 
 class _Tok:
@@ -74,10 +96,11 @@ def tokenize(source: str) -> list[_Tok]:
             break
         m = _TOKEN_RE.match(source, pos)
         if not m or m.end() == pos:
-            snippet = source[pos:].strip()
+            start = len(source) - len(source[pos:].lstrip())
+            snippet = source[start:].rstrip()
             if snippet[:1] in "'\"":
-                raise ExprError(f"unterminated quote in filter: {snippet}")
-            raise ExprError(f"unexpected character in filter at: {snippet}")
+                raise ExprError(f"unterminated quote in filter: {snippet}", source, start)
+            raise ExprError(f"unexpected character in filter at: {snippet}", source, start)
         kind = m.lastgroup
         start = m.start(kind)
         if kind in ("sq", "dq"):
@@ -98,12 +121,33 @@ class _Parser:
     def peek(self) -> _Tok | None:
         return self.tokens[self.i] if self.i < len(self.tokens) else None
 
+    def error(self, message: str, at: _Tok | int) -> ExprError:
+        """An ExprError pointing at a token or a character offset."""
+        if isinstance(at, _Tok):
+            # A quoted token's pos is just inside the quote; point at the quote.
+            at = at.pos - 1 if at.kind == "str" else at.pos
+        return ExprError(message, self.source, at)
+
     def take(self) -> _Tok:
         tok = self.peek()
         if tok is None:
-            raise ExprError(f"filter ends too early: {self.source!r}")
+            raise self.error("filter ends too early", len(self.source.rstrip()))
         self.i += 1
         return tok
+
+    def resolve(self, name: str, at: _Tok | int, prefix: str = "") -> int:
+        try:
+            return self.table.resolve(name)
+        except TableError as exc:
+            raise self.error(f"{prefix}{exc}", at) from None
+
+    def compare(self, idx: int, op: str, raw: str | _ColRef, at: int) -> Predicate:
+        try:
+            return _compare(self.table, idx, op, raw)
+        except ExprError as exc:
+            if exc.pos is not None:
+                raise
+            raise self.error(exc.message, at) from None
 
     def parse(self) -> Predicate:
         if not self.tokens:
@@ -111,7 +155,7 @@ class _Parser:
         pred = self.or_expr()
         tok = self.peek()
         if tok is not None:
-            raise ExprError(f"unexpected {tok.text!r} in filter (missing 'and'/'or'?)")
+            raise self.error(f"unexpected {tok.text!r} in filter (missing 'and'/'or'?)", tok)
         return pred
 
     def or_expr(self) -> Predicate:
@@ -143,15 +187,15 @@ class _Parser:
             inner = self.or_expr()
             close = self.take()
             if close.kind != "rparen":
-                raise ExprError(f"expected ')' but found {close.text!r}")
+                raise self.error(f"expected ')' but found {close.text!r}", close)
             return inner
         return self.comparison()
 
     def comparison(self) -> Predicate:
         col_tok = self.take()
         if col_tok.kind not in ("word", "str"):
-            raise ExprError(f"expected a column name but found {col_tok.text!r}")
-        idx = self.table.resolve(col_tok.text)
+            raise self.error(f"expected a column name but found {col_tok.text!r}", col_tok)
+        idx = self.resolve(col_tok.text, col_tok)
         op_tok = self.take()
         if op_tok.keyword("is"):
             negate = False
@@ -160,92 +204,97 @@ class _Parser:
                 negate = True
                 nxt = self.take()
             if not nxt.keyword("null", "empty"):
-                raise ExprError(f"expected 'null' after 'is' but found {nxt.text!r}")
+                raise self.error(f"expected 'null' after 'is' but found {nxt.text!r}", nxt)
             return lambda row: is_null(row[idx]) != negate
         negate = False
         if op_tok.keyword("not"):
             negate = True
             op_tok = self.take()
             if not op_tok.keyword("in", "between"):
-                raise ExprError(
-                    f"expected 'in' or 'between' after 'not' but found {op_tok.text!r}"
+                raise self.error(
+                    f"expected 'in' or 'between' after 'not' but found {op_tok.text!r}",
+                    op_tok,
                 )
         if op_tok.keyword("in"):
             return self.in_list(idx, negate)
         if op_tok.keyword("between"):
             return self.between(idx, negate)
         if op_tok.kind != "op":
-            raise ExprError(
-                f"expected an operator after {col_tok.text!r} but found {op_tok.text!r}"
+            raise self.error(
+                f"expected an operator after {col_tok.text!r} but found {op_tok.text!r}",
+                op_tok,
             )
-        return _compare(self.table, idx, op_tok.text, self.value(op_tok.text))
+        raw, pos = self.value(op_tok.text)
+        return self.compare(idx, op_tok.text, raw, pos)
 
-    def value(self, after: str) -> str | _ColRef:
+    def value(self, after: str) -> tuple[str | _ColRef, int]:
+        """Read a literal or ``@column`` value; return it and its offset."""
         tok = self.take()
         if tok.kind not in ("word", "str"):
-            raise ExprError(f"expected a value after {after!r} but found {tok.text!r}")
+            raise self.error(f"expected a value after {after!r} but found {tok.text!r}", tok)
         if tok.kind == "word" and tok.text.startswith("@"):
             name = tok.text[1:]
             if not name:
                 nxt = self.peek()
                 # The quoted name must follow '@' directly: @'unit price'.
                 if nxt is None or nxt.kind != "str" or nxt.pos != tok.pos + 2:
-                    raise ExprError("expected a column name after '@'")
+                    raise self.error("expected a column name after '@'", tok)
                 name = self.take().text
-            return self.column_ref(name)
-        return tok.text
+            return self.column_ref(name, tok.pos), tok.pos
+        return tok.text, (tok.pos - 1 if tok.kind == "str" else tok.pos)
 
-    def column_ref(self, name: str) -> _ColRef:
-        try:
-            idx = self.table.resolve(name)
-            return _ColRef(idx, self.table.columns[idx])
-        except TableError as exc:
-            raise ExprError(f"in '@{name}': {exc}") from None
+    def column_ref(self, name: str, pos: int) -> _ColRef:
+        idx = self.resolve(name, pos, prefix=f"in '@{name}': ")
+        return _ColRef(idx, self.table.columns[idx])
 
     def in_list(self, idx: int, negate: bool) -> Predicate:
         open_tok = self.take()
         if open_tok.kind != "lparen":
-            raise ExprError(f"expected '(' after 'in' but found {open_tok.text!r}")
-        values: list[str | _ColRef] = []
+            raise self.error(f"expected '(' after 'in' but found {open_tok.text!r}", open_tok)
+        values: list[tuple[str | _ColRef, int]] = []
         while True:
             tok = self.take()
             if tok.kind == "rparen":
                 break
             if tok.kind == "str":
-                values.append(tok.text)
+                values.append((tok.text, tok.pos - 1))
             elif tok.kind == "word" and tok.text == "@":
                 # @'quoted name': let value() read the name that follows.
                 self.i -= 1
                 values.append(self.value("in"))
             elif tok.kind == "word":
                 # Commas are not separate tokens: "Paris," and "a,b" split here.
+                pos = tok.pos
                 for v in tok.text.split(","):
                     if v.startswith("@") and len(v) > 1:
-                        values.append(self.column_ref(v[1:]))
+                        values.append((self.column_ref(v[1:], pos), pos))
                     elif v:
-                        values.append(v)
+                        values.append((v, pos))
+                    pos += len(v) + 1
             else:
-                raise ExprError(f"unexpected {tok.text!r} in 'in' list")
+                raise self.error(f"unexpected {tok.text!r} in 'in' list", tok)
         if not values:
-            raise ExprError("empty 'in' list")
+            raise self.error("empty 'in' list", open_tok)
         if negate:
             # Each != predicate already rejects nulls, like != on its own.
-            preds = [_compare(self.table, idx, "!=", v) for v in values]
+            preds = [self.compare(idx, "!=", v, pos) for v, pos in values]
             return lambda row: all(p(row) for p in preds)
-        preds = [_compare(self.table, idx, "=", v) for v in values]
+        preds = [self.compare(idx, "=", v, pos) for v, pos in values]
         return lambda row: any(p(row) for p in preds)
 
     def between(self, idx: int, negate: bool) -> Predicate:
-        low = self.value("between")
+        low, low_pos = self.value("between")
         and_tok = self.take()
         if not and_tok.keyword("and"):
-            raise ExprError(f"expected 'and' after {low!r} but found {and_tok.text!r}")
-        high = self.value("and")
-        ge = _compare(self.table, idx, ">=", low)
-        le = _compare(self.table, idx, "<=", high)
+            raise self.error(
+                f"expected 'and' after {low!r} but found {and_tok.text!r}", and_tok
+            )
+        high, high_pos = self.value("and")
+        ge = self.compare(idx, ">=", low, low_pos)
+        le = self.compare(idx, "<=", high, high_pos)
         if negate:
-            lt = _compare(self.table, idx, "<", low)
-            gt = _compare(self.table, idx, ">", high)
+            lt = self.compare(idx, "<", low, low_pos)
+            gt = self.compare(idx, ">", high, high_pos)
             return lambda row: lt(row) or gt(row)
         return lambda row: ge(row) and le(row)
 

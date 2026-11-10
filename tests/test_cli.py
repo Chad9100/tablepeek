@@ -137,6 +137,17 @@ def test_errors_exit_2(people, tmp_path, capsys, argv, message):
     assert message in err
 
 
+def test_filter_error_points_at_position(people, capsys):
+    code, out, err = run(capsys, "filter", people, "age>30 and city>=@scor")
+    assert code == 2
+    assert out == ""
+    assert err.splitlines() == [
+        "tablepeek: error: in '@scor': unknown column 'scor' (columns: name, age, city, score)",
+        "  age>30 and city>=@scor",
+        "                   ^",
+    ]
+
+
 def test_usage_error_exits_2(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["head"])

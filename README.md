@@ -161,6 +161,13 @@ Bob,Lyon
 
 $ tablepeek filter examples/people.csv "salary>1"
 tablepeek: error: unknown column 'salary' (columns: name, age, city, joined, active, score)
+  salary>1
+  ^
+
+$ tablepeek filter examples/people.csv "age>30 and joined>=last-year"
+tablepeek: error: cannot compare date column 'joined' with 'last-year'
+  age>30 and joined>=last-year
+                     ^
 ```
 
 Reading from a pipe (tab-separated here, detected automatically):
@@ -215,6 +222,9 @@ city='New York'        # quote values with spaces or operator characters
   test for it with `is null`.
 - Column names match exactly first, then case-insensitively; quote names
   with spaces: `"unit price">10`.
+- A mistake in an expression (unknown column, a value that does not fit the
+  column's type, a missing `and`, an unclosed quote or parenthesis) is
+  reported with the expression and a `^` under the offending spot.
 
 ## How detection works
 
@@ -241,7 +251,7 @@ city='New York'        # quote values with spaces or operator characters
 - Per-column count, nulls, distinct, min, max and mean
 - Filter expressions with typed comparisons, `and`/`or`/`not`, parentheses,
   contains, regular expressions, `in` lists, `between` ranges, column-to-column
-  comparisons and null tests
+  comparisons and null tests; errors point at the offending spot
 - Stable multi-key sort by typed values, nulls last, per-key `:desc`
 - Output as an aligned table, CSV, JSON (typed values) or JSON Lines
 - Auto-detected encoding and delimiter; stdin support
