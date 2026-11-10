@@ -73,6 +73,12 @@ def test_filter_count(people, capsys):
     assert out == "3\n"
 
 
+def test_filter_column_to_column(people, capsys):
+    code, out, _ = run(capsys, "filter", people, "score > @age and age > 30", "-c", "name", "-f", "csv")
+    assert code == 0
+    assert out == "name\nAlice\nChloe\n"
+
+
 def test_sort_select_limit_pipeline(people, capsys):
     _, out, _ = run(capsys, "sort", people, "score:desc", "-c", "name", "-n", "3", "-f", "csv")
     assert out == "name\nChloe\nAlice\nEmma\n"

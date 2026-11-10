@@ -9,6 +9,7 @@ Grammar (keywords are case-insensitive)::
                 | COLUMN ["not"] "in" "(" VALUE ("," VALUE)* ")"
                 | COLUMN ["not"] "between" VALUE "and" VALUE
     OP         := = | == | != | > | >= | < | <= | ~ | !~ | =~
+    VALUE      := LITERAL | "@" COLUMN
 
 ``~`` is a case-insensitive "contains"; ``!~`` its negation. Columns and
 values may be quoted with '...' or "..." (needed for spaces or operator
@@ -19,6 +20,12 @@ numeric and ``date>=2024-01-01`` is chronological. A null cell never matches
 a comparison; use ``is null`` / ``is not null`` to test for it.
 ``in`` matches any listed value and ``between`` is inclusive at both ends;
 both use the same typed comparison as ``=`` and ``>=``/``<=``.
+
+A value written ``@name`` (or ``@'name with spaces'``) refers to another
+column of the same row, so ``end>@start`` compares two columns. Numeric
+columns compare as numbers and two date or bool columns by their type;
+otherwise only ``=``/``!=`` (as text) and ``~``/``!~`` are allowed. Quote a
+literal value that starts with ``@``: ``handle='@bob'``.
 """
 
 from __future__ import annotations
@@ -171,31 +178,52 @@ class _Parser:
             raise ExprError(
                 f"expected an operator after {col_tok.text!r} but found {op_tok.text!r}"
             )
-        val_tok = self.take()
-        if val_tok.kind not in ("word", "str"):
-            raise ExprError(f"expected a value after {op_tok.text!r} but found {val_tok.text!r}")
-        return _compare(self.table, idx, op_tok.text, val_tok.text)
+        return _compare(self.table, idx, op_tok.text, self.value(op_tok.text))
 
-    def value(self, after: str) -> str:
+    def value(self, after: str) -> str | _ColRef:
         tok = self.take()
         if tok.kind not in ("word", "str"):
             raise ExprError(f"expected a value after {after!r} but found {tok.text!r}")
+        if tok.kind == "word" and tok.text.startswith("@"):
+            name = tok.text[1:]
+            if not name:
+                nxt = self.peek()
+                # The quoted name must follow '@' directly: @'unit price'.
+                if nxt is None or nxt.kind != "str" or nxt.pos != tok.pos + 2:
+                    raise ExprError("expected a column name after '@'")
+                name = self.take().text
+            return self.column_ref(name)
         return tok.text
+
+    def column_ref(self, name: str) -> _ColRef:
+        try:
+            idx = self.table.resolve(name)
+            return _ColRef(idx, self.table.columns[idx])
+        except TableError as exc:
+            raise ExprError(f"in '@{name}': {exc}") from None
 
     def in_list(self, idx: int, negate: bool) -> Predicate:
         open_tok = self.take()
         if open_tok.kind != "lparen":
             raise ExprError(f"expected '(' after 'in' but found {open_tok.text!r}")
-        values: list[str] = []
+        values: list[str | _ColRef] = []
         while True:
             tok = self.take()
             if tok.kind == "rparen":
                 break
             if tok.kind == "str":
                 values.append(tok.text)
+            elif tok.kind == "word" and tok.text == "@":
+                # @'quoted name': let value() read the name that follows.
+                self.i -= 1
+                values.append(self.value("in"))
             elif tok.kind == "word":
                 # Commas are not separate tokens: "Paris," and "a,b" split here.
-                values.extend(v for v in tok.text.split(",") if v)
+                for v in tok.text.split(","):
+                    if v.startswith("@") and len(v) > 1:
+                        values.append(self.column_ref(v[1:]))
+                    elif v:
+                        values.append(v)
             else:
                 raise ExprError(f"unexpected {tok.text!r} in 'in' list")
         if not values:
@@ -233,7 +261,62 @@ _ORDER_OPS = {
 }
 
 
-def _compare(table: Table, idx: int, op: str, raw: str) -> Predicate:
+class _ColRef:
+    """A reference to another column (``@name``) on the right of an operator."""
+
+    __slots__ = ("idx", "name")
+
+    def __init__(self, idx: int, name: str):
+        self.idx, self.name = idx, name
+
+    def __repr__(self) -> str:
+        return repr("@" + self.name)
+
+
+_NUMERIC = ("int", "float")
+
+
+def _compare_columns(table: Table, idx: int, op: str, other: int) -> Predicate:
+    left, right = table.columns[idx], table.columns[other]
+    lkind, rkind = table.kinds[idx], table.kinds[other]
+
+    if op == "=~":
+        raise ExprError(f"'=~' needs a literal pattern, not column '@{right}'")
+
+    def both_present(row: list[str]) -> bool:
+        return not is_null(row[idx]) and not is_null(row[other])
+
+    if op in ("~", "!~"):
+        want = op == "~"
+        return lambda row: both_present(row) and (
+            (row[other].lower() in row[idx].lower()) == want
+        )
+
+    fn = _ORDER_OPS[op]
+    typed = (lkind in _NUMERIC and rkind in _NUMERIC) or (
+        lkind == rkind and lkind in ("date", "bool")
+    )
+    if not typed:
+        if lkind != rkind and op not in ("=", "==", "!="):
+            raise ExprError(
+                f"cannot order {lkind} column {left!r} against {rkind} column {right!r}"
+            )
+        return lambda row: both_present(row) and fn(row[idx].strip(), row[other].strip())
+
+    def pred(row: list[str]) -> bool:
+        try:
+            a = convert(row[idx], lkind)
+            b = convert(row[other], rkind)
+        except ValueError:
+            return False
+        return a is not None and b is not None and fn(a, b)
+
+    return pred
+
+
+def _compare(table: Table, idx: int, op: str, raw: str | _ColRef) -> Predicate:
+    if isinstance(raw, _ColRef):
+        return _compare_columns(table, idx, op, raw.idx)
     name = table.columns[idx]
     kind = table.kinds[idx]
 

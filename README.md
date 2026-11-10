@@ -185,6 +185,7 @@ name=~'^[A-C]'         # regular expression (case-sensitive; '(?i)...' to ignore
 email is null          # also: is not null
 city in (Paris, Lyon)  # any of the listed values; also: not in
 age between 20 and 30  # inclusive at both ends; also: not between
+end > @start           # compare with another column of the same row
 city='New York'        # quote values with spaces or operator characters
 ```
 
@@ -202,8 +203,16 @@ city='New York'        # quote values with spaces or operator characters
 - `=~` uses Python regular-expression syntax and matches anywhere in the
   cell's text, whatever the column type (`joined=~'^2023-'`). Quote patterns
   that contain spaces, parentheses or `=!<>~`; negate with `not`.
+- `@name` on the right-hand side refers to another column of the same row:
+  `spent > @budget`, `end >= @start`, `price between @low and @high`,
+  `city in (@home, Paris)`. Quote names with spaces as `@'unit price'`.
+  Two numeric columns (int or float) compare as numbers and two date or bool
+  columns by their type. Columns of different types can only be tested with
+  `=`/`!=` (as text) or `~`/`!~`; `=~` needs a literal pattern. Quote a
+  literal value that starts with `@`: `handle='@bob'`.
 - A null cell never matches a comparison (`age!=34` and `age not in (34)`
-  skip rows with no age); test for it with `is null`.
+  skip rows with no age, and `end>@start` skips rows where either is null);
+  test for it with `is null`.
 - Column names match exactly first, then case-insensitively; quote names
   with spaces: `"unit price">10`.
 
@@ -231,7 +240,8 @@ city='New York'        # quote values with spaces or operator characters
 - Type inference (int/float/date/bool/text) with null counts
 - Per-column count, nulls, distinct, min, max and mean
 - Filter expressions with typed comparisons, `and`/`or`/`not`, parentheses,
-  contains, regular expressions, `in` lists, `between` ranges and null tests
+  contains, regular expressions, `in` lists, `between` ranges, column-to-column
+  comparisons and null tests
 - Stable multi-key sort by typed values, nulls last, per-key `:desc`
 - Output as an aligned table, CSV, JSON (typed values) or JSON Lines
 - Auto-detected encoding and delimiter; stdin support

@@ -172,3 +172,88 @@ def test_regex_does_not_break_existing_operators(table):
 def test_bad_regex_error(table):
     with pytest.raises(ExprError, match=r"bad regular expression '\(' for 'name'"):
         compile_filter("name =~ '('", table)
+
+
+TRIPS = """id,start,end,planned,actual,budget,spent,from,to,ok,done,label
+1,2024-01-01,2024-01-05,3,4.5,100,90,Paris,Lyon,yes,yes,Paris trip
+2,2024-02-10,2024-02-08,5,5,80,120,Lyon,Lyon,no,yes,lyon loop
+3,2024-03-01,2024-03-01,2,1,50,,Berlin,Paris,yes,no,Berlin
+4,2024-04-01,,10,12,200,250,Rome,Milan,no,no,n/a
+"""
+
+
+@pytest.fixture
+def trips():
+    return parse_text(TRIPS, ",")
+
+
+def ids(table, expr):
+    pred = compile_filter(expr, table)
+    return [r[0] for r in table.rows if pred(r)]
+
+
+def test_column_reference_compares_dates(trips):
+    assert ids(trips, "end > @start") == ["1"]
+    assert ids(trips, "end < @start") == ["2"]
+    assert ids(trips, "end = @start") == ["3"]
+
+
+def test_column_reference_mixes_int_and_float_numerically(trips):
+    # "4.5" < "3" as text, but 4.5 > 3 as numbers; 12 > 10 likewise.
+    assert ids(trips, "actual > @planned") == ["1", "4"]
+    assert ids(trips, "actual = @planned") == ["2"]
+
+
+def test_column_reference_skips_nulls_on_either_side(trips):
+    assert ids(trips, "spent <= @budget") == ["1"]
+    assert ids(trips, "spent != @budget") == ["1", "2", "4"]
+    assert ids(trips, "end != @start") == ["1", "2"]
+
+
+def test_column_reference_text_and_bool(trips):
+    assert ids(trips, "from = @to") == ["2"]
+    assert ids(trips, "from != @to") == ["1", "3", "4"]
+    assert ids(trips, "ok = @done") == ["1", "4"]
+    assert ids(trips, "label ~ @from") == ["1", "2", "3"]
+    assert ids(trips, "label !~ @to") == ["1", "3"]
+
+
+def test_column_reference_in_between_and_in_lists(trips):
+    assert ids(trips, "spent between @budget and 300") == ["2", "4"]
+    assert ids(trips, "planned not between 3 and @actual") == ["3"]
+    assert ids(trips, "to in (@from, Milan)") == ["2", "4"]
+
+
+def test_column_reference_quoted_name_and_number():
+    t = parse_text("a b,c\n1,2\n3,3\n", ",")
+    assert [r[0] for r in t.rows if compile_filter("c = @'a b'", t)(r)] == ["3"]
+    assert [r[0] for r in t.rows if compile_filter('c > @"a b"', t)(r)] == ["1"]
+    assert [r[0] for r in t.rows if compile_filter("c > @1", t)(r)] == ["1"]
+
+
+def test_quoted_at_value_stays_literal():
+    t = parse_text("user,handle\nbob,@bob\nann,ann\n", ",")
+    assert [r[0] for r in t.rows if compile_filter("handle='@bob'", t)(r)] == ["bob"]
+
+
+@pytest.mark.parametrize(
+    "expr, message",
+    [
+        ("end > @nope", r"in '@nope': unknown column 'nope'"),
+        ("end > @", r"expected a column name after '@'"),
+        ("end > @ 'start'", r"expected a column name after '@'"),
+        ("end > @planned", r"cannot order date column 'end' against int column 'planned'"),
+        ("label =~ @from", r"'=~' needs a literal pattern, not column '@from'"),
+        ("planned between @actual end 3", r"expected 'and' after '@actual'"),
+    ],
+)
+def test_column_reference_errors(trips, expr, message):
+    with pytest.raises(ExprError, match=message):
+        compile_filter(expr, trips)
+
+
+def test_mismatched_kinds_allow_text_equality():
+    t = parse_text("n,code\n1,x\n2,2\n3,03\n", ",")
+    assert t.kinds == ["int", "text"]
+    assert [r[0] for r in t.rows if compile_filter("n = @code", t)(r)] == ["2"]
+    assert [r[0] for r in t.rows if compile_filter("n != @code", t)(r)] == ["1", "3"]
