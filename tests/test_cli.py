@@ -226,6 +226,51 @@ def test_without_null_option_dash_is_text(tmp_path, capsys):
     assert json.loads(out.splitlines()[1])["type"] == "text"
 
 
+def test_group_default_counts_rows(people, capsys):
+    code, out, _ = run(capsys, "group", people, "city", "-f", "jsonl")
+    assert code == 0
+    recs = [json.loads(line) for line in out.splitlines()]
+    assert recs == [
+        {"city": "Paris", "count": 3},
+        {"city": "Lyon", "count": 1},
+        {"city": "Berlin", "count": 1},
+    ]
+
+
+def test_group_aggregates_skip_nulls(people, capsys):
+    code, out, _ = run(
+        capsys, "group", people, "city", "-a", "count,mean:score,max:age,sum:age,distinct:age",
+        "-f", "jsonl",
+    )
+    assert code == 0
+    recs = {r["city"]: r for r in map(json.loads, out.splitlines())}
+    assert recs["Paris"]["mean_score"] == pytest.approx((88.5 + 91.25 + 79) / 3, abs=1e-5)
+    assert recs["Paris"]["max_age"] == 41
+    assert recs["Paris"]["sum_age"] == 105
+    assert recs["Paris"]["distinct_age"] == 3
+    assert recs["Berlin"]["max_age"] is None
+    assert recs["Berlin"]["mean_score"] is None
+    assert recs["Berlin"]["count"] == 1
+
+
+def test_group_where_limit_and_table(people, capsys):
+    code, out, _ = run(capsys, "group", people, "city", "-w", "age>28", "-n", "1")
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0].split() == ["city", "count"]
+    assert lines[2].split() == ["Paris", "3"]
+    assert len(lines) == 3
+
+
+def test_group_errors(people, capsys):
+    code, _, err = run(capsys, "group", people, "city", "-a", "mean:city")
+    assert code == 2 and "numeric" in err
+    code, _, err = run(capsys, "group", people, "city", "-a", "median:age")
+    assert code == 2 and "unknown aggregate" in err
+    code, _, err = run(capsys, "group", people, "city", "-a", "max")
+    assert code == 2 and "needs a column" in err
+
+
 def test_skip_too_many_lines_is_an_error(people, capsys):
     code, _, err = run(capsys, "head", people, "--skip", "99")
     assert code == 2

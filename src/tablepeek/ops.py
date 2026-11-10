@@ -125,6 +125,89 @@ def stats(
     return out
 
 
+AGG_FUNCS = ("count", "sum", "mean", "min", "max", "distinct")
+
+
+def parse_agg_spec(table: Table, spec: str) -> list[tuple[str, int | None]]:
+    """Parse ``count,mean:score,max:age`` into ``[(func, column index), ...]``.
+
+    ``count`` takes no column (it counts rows); every other function needs one.
+    ``sum`` and ``mean`` need a numeric column.
+    """
+    aggs: list[tuple[str, int | None]] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        func, _, col = part.partition(":")
+        func = func.strip().lower()
+        if func not in AGG_FUNCS:
+            raise TableError(f"unknown aggregate {func!r} (use {', '.join(AGG_FUNCS)})")
+        if func == "count" and not col.strip():
+            aggs.append((func, None))
+            continue
+        if not col.strip():
+            raise TableError(f"aggregate {func!r} needs a column, e.g. {func}:age")
+        idx = table.resolve(col.strip())
+        if func in ("sum", "mean") and table.kinds[idx] not in ("int", "float"):
+            raise TableError(
+                f"{func} needs a numeric column; {table.columns[idx]!r} is {table.kinds[idx]}"
+            )
+        aggs.append((func, idx))
+    if not aggs:
+        raise TableError("empty aggregate list")
+    return aggs
+
+
+def agg_name(table: Table, func: str, idx: int | None) -> str:
+    return func if idx is None else f"{func}_{table.columns[idx]}"
+
+
+def group_by(
+    table: Table,
+    rows: list[list[str]],
+    key_indices: list[int],
+    aggs: list[tuple[str, int | None]],
+) -> list[dict]:
+    """Group rows by the key columns and aggregate; groups keep first-seen order.
+
+    Null cells are skipped by every aggregate except a bare ``count``, which
+    counts rows. A null key forms its own group (shown as an empty cell).
+    """
+    groups: dict[tuple, list[list[str]]] = {}
+    for row in rows:
+        key = tuple("" if is_null(row[i]) else row[i].strip() for i in key_indices)
+        groups.setdefault(key, []).append(row)
+    names = [agg_name(table, f, i) for f, i in aggs]
+    out = []
+    for key, members in groups.items():
+        rec: dict = {}
+        for i, cell in zip(key_indices, key):
+            value = convert(cell, table.kinds[i]) if cell else None
+            rec[table.columns[i]] = value
+        for name, (func, idx) in zip(names, aggs):
+            if idx is None:
+                rec[name] = len(members)
+                continue
+            vals = [convert(r[idx], table.kinds[idx]) for r in members if not is_null(r[idx])]
+            if func == "count":
+                rec[name] = len(vals)
+            elif func == "distinct":
+                rec[name] = len({_distinct_key(v) for v in vals})
+            elif not vals:
+                rec[name] = None
+            elif func == "sum":
+                rec[name] = sum(vals)
+            elif func == "mean":
+                rec[name] = sum(vals) / len(vals)
+            else:
+                keyed = [_sort_value(v, "text") if isinstance(v, str) else v for v in vals]
+                pick = min if func == "min" else max
+                rec[name] = vals[pick(range(len(vals)), key=keyed.__getitem__)]
+        out.append(rec)
+    return out
+
+
 def _distinct_key(value):
     if isinstance(value, str):
         return value.strip()

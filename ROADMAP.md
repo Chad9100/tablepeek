@@ -38,7 +38,7 @@ Estimates are rough working hours for one person.
 
 ## v0.5: grouping (about 4 h)
 
-- [ ] `tablepeek group FILE city --agg count,mean:score,max:age`
+- [x] `tablepeek group FILE city --agg count,mean:score,max:age`
 - [x] `stats --top N` showing the most frequent values per column
 - [ ] Histogram bars for numeric columns in `stats --hist`
 

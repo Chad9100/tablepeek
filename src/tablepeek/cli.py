@@ -9,7 +9,9 @@ import sys
 
 from tablepeek import __version__
 from tablepeek.expr import compile_filter
-from tablepeek.ops import parse_sort_spec, schema, sort_rows, stats
+from tablepeek.ops import (
+    agg_name, group_by, parse_agg_spec, parse_sort_spec, schema, sort_rows, stats,
+)
 from tablepeek.render import FORMATS, format_value, render_rows, render_summary
 from tablepeek.table import DELIMITER_NAMES, Table, TableError, load, parse_delimiter
 
@@ -94,6 +96,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--top", type=_positive_int, default=0, metavar="N",
         help="also show the N most frequent values per column",
     )
+
+    p = sub.add_parser("group", parents=[common], help="aggregate rows grouped by columns")
+    p.add_argument("keys", help="comma-separated columns to group by, e.g. city,active")
+    p.add_argument(
+        "-a", "--agg", default="count", metavar="AGGS",
+        help="aggregates, e.g. count,mean:score,max:age "
+        "(count, sum, mean, min, max, distinct; default: count)",
+    )
+    p.add_argument("-w", "--where", metavar="EXPR", help="group only rows matching EXPR")
+    p.add_argument("-n", "--limit", type=_positive_int, metavar="N", help="output at most N groups")
 
     p = sub.add_parser("filter", parents=[common, rowopts], help="rows matching an expression")
     p.add_argument("expr", help="e.g. \"age>30 and city=Paris\"")
@@ -203,6 +215,23 @@ def _stats_command(args, table: Table) -> str:
     )
 
 
+def _group_command(args, table: Table) -> str:
+    rows = table.rows
+    if args.where:
+        pred = compile_filter(args.where, table)
+        rows = [r for r in rows if pred(r)]
+    keys = table.resolve_list(args.keys)
+    aggs = parse_agg_spec(table, args.agg)
+    records = group_by(table, rows, keys, aggs)
+    if args.limit is not None:
+        records = records[: args.limit]
+    right = tuple(agg_name(table, f, i) for f, i in aggs)
+    right += tuple(table.columns[i] for i in keys if table.kinds[i] in ("int", "float"))
+    return render_summary(
+        args.format, records, right, args.max_width, parse_delimiter(args.out_delimiter)
+    )
+
+
 def _write(text: str) -> None:
     try:
         sys.stdout.write(text)
@@ -224,6 +253,8 @@ def main(argv: list[str] | None = None) -> int:
         table = _load(args)
         if args.command == "schema":
             text = _schema_command(args, table)
+        elif args.command == "group":
+            text = _group_command(args, table)
         elif args.command == "stats":
             text = _stats_command(args, table)
         else:

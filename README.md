@@ -28,6 +28,7 @@ That puts a `tablepeek` command on your PATH. `python -m tablepeek` works too.
 tablepeek head   FILE [-n N]
 tablepeek schema FILE
 tablepeek stats  FILE [-c COLS] [-w EXPR] [--top N]
+tablepeek group  FILE COLS [-a AGGS] [-w EXPR] [-n N]
 tablepeek filter FILE EXPR
 tablepeek sort   FILE COLS
 tablepeek select FILE COLS
@@ -117,6 +118,31 @@ column  type  count  nulls  distinct  min     max   mean  top
 ------  ----  -----  -----  --------  ------  ----  ----  -------------------
 city    text      8      0         5  Berlin  Rome        Paris (3), Lyon (2)
 active  bool      8      0         2  false   true        true (5), false (3)
+```
+
+Grouping (`group`). `-a` takes `count`, `sum:COL`, `mean:COL`, `min:COL`,
+`max:COL`, `distinct:COL` (default `count`); nulls are skipped, groups keep
+first-seen order, and several key columns can be given:
+
+```text
+$ tablepeek group examples/people.csv city -a count,mean:score,max:age
+city       count  mean_score  max_age
+---------  -----  ----------  -------
+Paris          3       86.25       41
+Lyon           2          71       29
+Berlin         1
+Marseille      1        65.5       52
+Rome           1          84       38
+
+$ tablepeek group examples/people.csv active,city -a sum:score -f md
+| active | city | sum_score |
+| --- | --- | ---: |
+| true | Paris | 179.75 |
+| false | Lyon | 142 |
+| true | Berlin |  |
+| false | Paris | 79 |
+| true | Marseille | 65.5 |
+| true | Rome | 84 |
 ```
 
 Custom null tokens (`--null`). In `examples/dashes.csv` a dash marks a missing
@@ -295,7 +321,7 @@ city='New York'        # quote values with spaces or operator characters
 
 ## Features
 
-- `head`, `schema`, `stats`, `filter`, `sort`, `select` subcommands
+- `head`, `schema`, `stats`, `group`, `filter`, `sort`, `select` subcommands
 - Type inference (int/float/date/bool/text) with null counts
 - Per-column count, nulls, distinct, min, max and mean
 - Filter expressions with typed comparisons, `and`/`or`/`not`, parentheses,
