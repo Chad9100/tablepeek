@@ -27,7 +27,7 @@ That puts a `tablepeek` command on your PATH. `python -m tablepeek` works too.
 ```text
 tablepeek head   FILE [-n N]
 tablepeek schema FILE
-tablepeek stats  FILE [-c COLS] [-w EXPR]
+tablepeek stats  FILE [-c COLS] [-w EXPR] [--top N]
 tablepeek filter FILE EXPR
 tablepeek sort   FILE COLS
 tablepeek select FILE COLS
@@ -56,6 +56,10 @@ one command can filter, sort and pick columns at once:
 | `-c, --columns COLS` | output only these columns (names or 1-based numbers) |
 | `-n, --limit N` | output at most N rows (`head` defaults to 10) |
 | `--count` | print only the number of matching rows |
+
+`stats --top N` adds a `top` column with the N most frequent values and their
+counts (ties keep first-seen order). In `json`/`jsonl` output `top` is a list
+of `{"value", "count"}` objects.
 
 They are applied in that order: filter, sort, limit, then columns. Errors
 (unknown column, bad expression, unreadable file) go to stderr with exit
@@ -106,6 +110,41 @@ column  type   count  nulls  distinct   min    max     mean
 ------  -----  -----  -----  --------  ----  -----  -------
 age     int        4      1         4    34     52    41.25
 score   float      4      1         4  65.5  91.25  82.3125
+
+$ tablepeek stats examples/people.csv --top 2 -c city,active
+column  type  count  nulls  distinct  min     max   mean  top
+------  ----  -----  -----  --------  ------  ----  ----  -------------------
+city    text      8      0         5  Berlin  Rome        Paris (3), Lyon (2)
+active  bool      8      0         2  false   true        true (5), false (3)
+```
+
+Custom null tokens (`--null`). In `examples/dashes.csv` a dash marks a missing
+value, so by default `qty` and `price` are inferred as text:
+
+```text
+$ tablepeek schema examples/dashes.csv
+examples/dashes.csv: 4 rows, 3 columns, delimiter comma, encoding utf-8
+
+#  column  type  non_null  nulls  example
+-  ------  ----  --------  -----  -------
+1  item    text         4      0  pen
+2  qty     text         4      0  10
+3  price   text         4      0  1.5
+
+$ tablepeek schema examples/dashes.csv --null -
+examples/dashes.csv: 4 rows, 3 columns, delimiter comma, encoding utf-8
+
+#  column  type   non_null  nulls  example
+-  ------  -----  --------  -----  -------
+1  item    text          4      0  pen
+2  qty     int           2      2  10
+3  price   float         3      1  1.5
+
+$ tablepeek filter examples/dashes.csv "qty is null" --null -
+item   qty  price
+-----  ---  -----
+ruler        2.25
+tape         0.99
 ```
 
 ```text

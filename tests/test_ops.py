@@ -77,6 +77,16 @@ def test_stats_values(table):
     assert s["score"]["count"] == 4
 
 
+def test_stats_top_orders_by_count_then_first_seen(table):
+    s = {r["column"]: r for r in stats(table, table.rows, top=2)}
+    assert s["city"]["top"] == [
+        {"value": "Lyon", "count": 2},
+        {"value": "Paris", "count": 2},
+    ]
+    assert len(s["age"]["top"]) == 2
+    assert "top" not in stats(table, table.rows)[0]
+
+
 def test_stats_subset_and_empty(table):
     out = stats(table, [], [1])
     assert out == [

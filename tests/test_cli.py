@@ -54,6 +54,15 @@ def test_schema_json(people, capsys):
     assert doc["columns"][1]["nulls"] == 1
 
 
+def test_stats_top_table_and_json(people, capsys):
+    code, out, _ = run(capsys, "stats", people, "-c", "city", "--top", "1")
+    assert code == 0
+    assert "top" in out.splitlines()[0]
+    assert "Paris (3)" in out
+    code, out, _ = run(capsys, "stats", people, "-c", "city", "--top", "1", "-f", "json")
+    assert json.loads(out)[0]["top"] == [{"value": "Paris", "count": 3}]
+
+
 def test_stats_json_with_where(people, capsys):
     _, out, _ = run(capsys, "stats", people, "-w", "city=Paris", "-c", "age,score", "-f", "json")
     recs = {r["column"]: r for r in json.loads(out)}

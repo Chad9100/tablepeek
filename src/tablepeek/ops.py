@@ -75,8 +75,17 @@ def schema(table: Table) -> list[dict]:
     return out
 
 
-def stats(table: Table, rows: list[list[str]], indices: list[int] | None = None) -> list[dict]:
-    """Per-column count, nulls, distinct, min, max and (numeric) mean."""
+def stats(
+    table: Table,
+    rows: list[list[str]],
+    indices: list[int] | None = None,
+    top: int = 0,
+) -> list[dict]:
+    """Per-column count, nulls, distinct, min, max and (numeric) mean.
+
+    With ``top`` > 0 each record also gets a ``top`` list of the most
+    frequent ``{"value", "count"}`` pairs (ties keep first-seen order).
+    """
     if indices is None:
         indices = list(range(len(table.columns)))
     out = []
@@ -90,16 +99,21 @@ def stats(table: Table, rows: list[list[str]], indices: list[int] | None = None)
                 nulls += 1
                 continue
             values.append(convert(cell, kind))
+        counts = Counter(_distinct_key(v) for v in values)
         record: dict = {
             "column": table.columns[i],
             "type": kind,
             "count": len(values),
             "nulls": nulls,
-            "distinct": len(Counter(_distinct_key(v) for v in values)),
+            "distinct": len(counts),
             "min": None,
             "max": None,
             "mean": None,
         }
+        if top > 0:
+            record["top"] = [
+                {"value": v, "count": n} for v, n in counts.most_common(top)
+            ]
         if values:
             keyed = [_sort_value(v, "text") if isinstance(v, str) else v for v in values]
             lo = min(range(len(values)), key=keyed.__getitem__)

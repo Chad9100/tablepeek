@@ -10,7 +10,7 @@ import sys
 from tablepeek import __version__
 from tablepeek.expr import compile_filter
 from tablepeek.ops import parse_sort_spec, schema, sort_rows, stats
-from tablepeek.render import FORMATS, render_rows, render_summary
+from tablepeek.render import FORMATS, format_value, render_rows, render_summary
 from tablepeek.table import DELIMITER_NAMES, Table, TableError, load
 
 PROG = "tablepeek"
@@ -86,6 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("stats", parents=[common], help="min/max/mean/distinct per column")
     p.add_argument("-w", "--where", metavar="EXPR", help="summarise only rows matching EXPR")
     p.add_argument("-c", "--columns", metavar="COLS", help="summarise only these columns")
+    p.add_argument(
+        "--top", type=_positive_int, default=0, metavar="N",
+        help="also show the N most frequent values per column",
+    )
 
     p = sub.add_parser("filter", parents=[common, rowopts], help="rows matching an expression")
     p.add_argument("expr", help="e.g. \"age>30 and city=Paris\"")
@@ -173,7 +177,12 @@ def _stats_command(args, table: Table) -> str:
         pred = compile_filter(args.where, table)
         rows = [r for r in rows if pred(r)]
     indices = table.resolve_list(args.columns) if args.columns else None
-    records = stats(table, rows, indices)
+    records = stats(table, rows, indices, args.top)
+    if args.top and args.format in ("table", "csv"):
+        for rec in records:
+            rec["top"] = ", ".join(
+                f"{format_value(t['value'])} ({t['count']})" for t in rec["top"]
+            )
     right = ("count", "nulls", "distinct", "mean")
     if args.format == "table":
         right += tuple(
