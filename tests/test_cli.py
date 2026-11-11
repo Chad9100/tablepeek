@@ -298,3 +298,15 @@ def test_stats_hist_rejects_csv(people, capsys):
     code, _, err = run(capsys, "stats", people, "--hist", "-f", "csv")
     assert code == 2
     assert "--hist" in err
+
+
+def test_decimal_comma_cli(tmp_path, capsys):
+    p = tmp_path / "eu.csv"
+    p.write_text("n;v\na;1.234,5\nb;39,9\nc;1.050\n", encoding="utf-8")
+    code, out, _ = run(capsys, "schema", str(p), "--decimal-comma", "-f", "jsonl")
+    recs = [json.loads(line) for line in out.splitlines()]
+    assert [r["type"] for r in recs] == ["text", "float"]
+    code, out, _ = run(capsys, "filter", str(p), "v > 1000", "--decimal-comma", "-f", "csv")
+    assert out.splitlines() == ["n,v", "a,1234.5", "c,1050"]
+    code, out, _ = run(capsys, "schema", str(p), "-f", "jsonl")
+    assert json.loads(out.splitlines()[1])["type"] == "text"

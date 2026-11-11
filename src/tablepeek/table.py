@@ -9,6 +9,7 @@ from __future__ import annotations
 import codecs
 import csv
 import io
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -174,6 +175,19 @@ def _clean_header(raw: list[str]) -> list[str]:
     return columns
 
 
+_EURO_NUMBER_RE = re.compile(r"([+-]?)(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d+))?")
+
+
+def normalize_decimal_comma(cell: str) -> str:
+    """Rewrite a European number (``1.234,5``) as ``1234.5``; leave others alone."""
+    m = _EURO_NUMBER_RE.fullmatch(cell.strip())
+    if not m:
+        return cell
+    sign, whole, frac = m.groups()
+    out = sign + whole.replace(".", "")
+    return f"{out}.{frac}" if frac is not None else out
+
+
 def parse_text(
     text: str,
     delimiter: str,
@@ -181,6 +195,7 @@ def parse_text(
     encoding: str = "utf-8",
     source: str = "<stdin>",
     null_tokens: Sequence[str] = (),
+    decimal_comma: bool = False,
 ) -> Table:
     """Parse decoded text into a Table. Blank lines are skipped.
 
@@ -217,6 +232,8 @@ def parse_text(
             row = row[:width]
         if extra:
             row = ["" if cell.strip() in extra else cell for cell in row]
+        if decimal_comma:
+            row = [normalize_decimal_comma(cell) for cell in row]
         table.rows.append(row)
     return table
 
@@ -229,6 +246,7 @@ def load(
     stdin=None,
     skip: int = 0,
     null_tokens: Sequence[str] = (),
+    decimal_comma: bool = False,
 ) -> Table:
     """Read ``path`` (``-`` for stdin) into a Table."""
     if path == "-":
@@ -258,4 +276,4 @@ def load(
     else:
         delim = parse_delimiter(delimiter)
     return parse_text(text, delim, header=header, encoding=used, source=source,
-                      null_tokens=null_tokens)
+                      null_tokens=null_tokens, decimal_comma=decimal_comma)

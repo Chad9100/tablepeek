@@ -25,7 +25,8 @@ Estimates are rough working hours for one person.
 
 - [ ] Day-first and month-first dates (`07/03/2024`) with a `--dayfirst`
       switch, and detection when the column is unambiguous
-- [ ] Thousands separators and decimal commas (`1.234,5`) for European files
+- [x] Thousands separators and decimal commas (`1.234,5`) for European files
+      (`--decimal-comma`)
 - [x] `--skip N` for files with preamble lines before the header
 - [x] Custom null tokens (`--null -`)
 

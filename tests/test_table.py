@@ -143,3 +143,23 @@ def test_resolve_columns():
     assert t.resolve_list("City, name") == [2, 0]
     with pytest.raises(TableError, match="unknown column 'zip'"):
         t.resolve("zip")
+
+
+def test_normalize_decimal_comma():
+    from tablepeek.table import normalize_decimal_comma as n
+
+    assert n("1.234,5") == "1234.5"
+    assert n("-2.480,00") == "-2480.00"
+    assert n("39,9") == "39.9"
+    assert n("1.050") == "1050"
+    assert n("12") == "12"
+    assert n("1.5") == "1.5"
+    assert n("abc") == "abc"
+    assert n("1,2,3") == "1,2,3"
+
+
+def test_parse_text_decimal_comma():
+    t = parse_text("a;b\n1.234,5;x\n2,5;y\n", ";", decimal_comma=True)
+    assert t.rows == [["1234.5", "x"], ["2.5", "y"]]
+    t = parse_text("a;b\n1.234,5;x\n", ";")
+    assert t.rows == [["1.234,5", "x"]]

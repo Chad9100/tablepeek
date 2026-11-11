@@ -52,6 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="also treat TOKEN (e.g. -) as a null value; repeatable",
     )
     common.add_argument(
+        "--decimal-comma", action="store_true",
+        help="read European numbers (1.234,5) as 1234.5; thousands dots are removed",
+    )
+    common.add_argument(
         "-f", "--format", choices=FORMATS, default="table",
         help="output format (default: table)",
     )
@@ -138,6 +142,7 @@ def _load(args) -> Table:
         header=not args.no_header,
         skip=args.skip,
         null_tokens=args.null_tokens,
+        decimal_comma=args.decimal_comma,
     )
     if table.long_rows:
         _warn(f"{table.long_rows} row(s) had more fields than the header; extra fields ignored")

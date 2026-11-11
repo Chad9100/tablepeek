@@ -42,6 +42,7 @@ tablepeek select FILE COLS
 | `-e, --encoding E` | text encoding; default is auto-detect |
 | `--no-header` | the first line is data; columns become `col1`, `col2`, ... |
 | `--skip N` | ignore the first N lines, for files with a preamble before the header |
+| `--decimal-comma` | read European numbers (`1.234,5`) as `1234.5`; thousands dots are removed |
 | `--null TOKEN` | also treat cells equal to TOKEN (for example `-` or `?`) as null; repeat for several tokens. Matching nulls show as empty cells |
 | `-f, --format F` | `table` (default), `csv`, `md` (Markdown table), `json` or `jsonl` |
 | `--out-delimiter C` | delimiter for `-f csv` output (default comma; `tab`, `semicolon`, `pipe` also accepted) |
@@ -191,6 +192,40 @@ item   qty  price
 ruler        2.25
 tape         0.99
 ```
+
+European numbers (`--decimal-comma`). `examples/european.csv` writes numbers
+as `1.234,50`, so `preis` is text by default. With the switch, thousands dots
+are removed and the decimal comma becomes a point (cells are shown
+normalized, so `1.234,50` prints as `1234.50`):
+
+```text
+$ tablepeek schema examples/european.csv
+examples/european.csv: 4 rows, 3 columns, delimiter semicolon, encoding utf-8
+
+#  column   type  non_null  nulls  example
+-  -------  ----  --------  -----  --------
+1  produkt  text         4      0  Stuhl
+2  preis    text         4      0  1.234,50
+3  menge    int          4      0  3
+
+$ tablepeek schema examples/european.csv --decimal-comma
+examples/european.csv: 4 rows, 3 columns, delimiter semicolon, encoding utf-8
+
+#  column   type   non_null  nulls  example
+-  -------  -----  --------  -----  -------
+1  produkt  text          4      0  Stuhl
+2  preis    float         4      0  1234.50
+3  menge    int           4      0  3
+
+$ tablepeek filter examples/european.csv "preis > 1100" --decimal-comma
+produkt    preis  menge
+-------  -------  -----
+Stuhl    1234.50      3
+Tisch    2480.00      1
+```
+
+With `--decimal-comma`, a lone dotted group such as `1.050` is read as the
+thousands form (1050), so only use it on files that really are European.
 
 ```text
 $ tablepeek filter examples/people.csv "age>30 and city=Paris"
