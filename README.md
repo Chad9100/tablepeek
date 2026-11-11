@@ -45,6 +45,7 @@ tablepeek select FILE COLS
 | `--decimal-comma` | read European numbers (`1.234,5`) as `1234.5`; thousands dots are removed |
 | `--dayfirst` | read ambiguous slash dates such as `07/03/2024` as day/month (see below) |
 | `--null TOKEN` | also treat cells equal to TOKEN (for example `-` or `?`) as null; repeat for several tokens. Matching nulls show as empty cells |
+| `--sample N` | infer column types from the first N rows only; later values that do not fit are reported on stderr and treated as null |
 | `-f, --format F` | `table` (default), `csv`, `md` (Markdown table), `json` or `jsonl` |
 | `--out-delimiter C` | delimiter for `-f csv` output (default comma; `tab`, `semicolon`, `pipe` also accepted) |
 | `--max-width N` | clip table cells wider than N characters (default 40, `0` = never) |
@@ -388,6 +389,26 @@ city='New York'        # quote values with spaces or operator characters
 - A mistake in an expression (unknown column, a value that does not fit the
   column's type, a missing `and`, an unclosed quote or parenthesis) is
   reported with the expression and a `^` under the offending spot.
+
+## Sampling types
+
+By default a column's type comes from every row, so one stray value makes it
+`text`. With `--sample N` the type comes from the first N rows only, and every
+later value is checked against it. Values that do not fit are blanked (treated
+as null) and one warning per column names the count and the first offender.
+Real output for a small file where `qty` goes wrong after row 2:
+
+```text
+$ tablepeek schema mixed.csv --sample 2
+tablepeek: warning: column 'qty' was inferred as int from the first 2 rows, but 2 later value(s) do not fit (first: 'x' in data row 3); treated as null
+mixed.csv: 5 rows, 3 columns, delimiter comma, encoding utf-8
+
+#  column  type  non_null  nulls  example
+-  ------  ----  --------  -----  -------
+1  id      int          5      0  1
+2  qty     int          2      3  5
+3  note    text         5      0  a
+```
 
 ## How detection works
 

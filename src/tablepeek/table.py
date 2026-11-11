@@ -297,6 +297,44 @@ def parse_text(
     return table
 
 
+def apply_sample(table: Table, sample: int) -> list[str]:
+    """Infer column types from the first ``sample`` rows only.
+
+    Later cells that do not fit the inferred type are replaced by empty
+    strings (nulls) so every later stage can still convert them. One warning
+    per affected column is returned, naming the count and the first offender.
+    """
+    from tablepeek.infer import convert, infer_column
+
+    if sample < 1:
+        raise TableError("--sample must be at least 1")
+    head = table.rows[:sample]
+    table._kinds = [
+        infer_column(row[i] for row in head) for i in range(len(table.columns))
+    ]
+    warnings: list[str] = []
+    for i, kind in enumerate(table._kinds):
+        if kind == "text":
+            continue
+        bad = 0
+        first = None
+        for n, row in enumerate(table.rows[sample:], start=sample + 1):
+            try:
+                convert(row[i], kind)
+            except ValueError:
+                bad += 1
+                if first is None:
+                    first = (n, row[i])
+                row[i] = ""
+        if bad:
+            warnings.append(
+                f"column {table.columns[i]!r} was inferred as {kind} from the first "
+                f"{sample} rows, but {bad} later value(s) do not fit "
+                f"(first: {first[1]!r} in data row {first[0]}); treated as null"
+            )
+    return warnings
+
+
 def load(
     path: str,
     delimiter: str | None = None,

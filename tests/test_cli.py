@@ -320,3 +320,36 @@ def test_decimal_comma_cli(tmp_path, capsys):
     assert out.splitlines() == ["n,v", "a,1234.5", "c,1050"]
     code, out, _ = run(capsys, "schema", str(p), "-f", "jsonl")
     assert json.loads(out.splitlines()[1])["type"] == "text"
+
+
+def test_sample_infers_from_head_and_warns(tmp_path, capsys):
+    p = tmp_path / "mixed.csv"
+    p.write_text("id,qty\n1,5\n2,7\n3,x\n4,9.5\n5,\n", encoding="utf-8")
+    code, out, err = run(capsys, "schema", str(p), "--sample", "2", "-f", "jsonl")
+    recs = [json.loads(line) for line in out.splitlines()]
+    assert code == 0
+    assert [r["type"] for r in recs] == ["int", "int"]
+    assert recs[1]["non_null"] == 2
+    assert "column 'qty' was inferred as int from the first 2 rows" in err
+    assert "2 later value(s) do not fit" in err
+    assert "'x' in data row 3" in err
+    # without --sample the column is text and nothing is warned about
+    code, out, err = run(capsys, "schema", str(p), "-f", "jsonl")
+    assert json.loads(out.splitlines()[1])["type"] == "text"
+    assert err == ""
+
+
+def test_sample_clean_file_is_silent_and_filters_work(tmp_path, capsys):
+    p = tmp_path / "ok.csv"
+    p.write_text("n\n1\n2\n30\n40\n", encoding="utf-8")
+    code, out, err = run(capsys, "filter", str(p), "n > 10", "--sample", "1", "-f", "csv")
+    assert out.splitlines() == ["n", "30", "40"]
+    assert err == ""
+
+
+def test_sample_zero_is_an_error(tmp_path, capsys):
+    p = tmp_path / "ok.csv"
+    p.write_text("n\n1\n", encoding="utf-8")
+    code, out, err = run(capsys, "head", str(p), "--sample", "0")
+    assert code == 2
+    assert "--sample must be at least 1" in err

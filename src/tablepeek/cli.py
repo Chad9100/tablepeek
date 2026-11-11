@@ -13,7 +13,9 @@ from tablepeek.ops import (
     agg_name, group_by, parse_agg_spec, parse_sort_spec, schema, sort_rows, stats,
 )
 from tablepeek.render import FORMATS, format_value, render_rows, render_summary
-from tablepeek.table import DELIMITER_NAMES, Table, TableError, load, parse_delimiter
+from tablepeek.table import (
+    DELIMITER_NAMES, Table, TableError, apply_sample, load, parse_delimiter,
+)
 
 PROG = "tablepeek"
 
@@ -59,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dayfirst", action="store_true",
         help="read ambiguous dates like 07/03/2024 as day/month (default: only "
              "columns where the order is clear from the data are converted)",
+    )
+    common.add_argument(
+        "--sample", type=_positive_int, default=None, metavar="N",
+        help="infer column types from the first N rows only; later values that "
+             "do not fit are warned about and treated as null",
     )
     common.add_argument(
         "-f", "--format", choices=FORMATS, default="table",
@@ -152,6 +159,9 @@ def _load(args) -> Table:
     )
     if table.long_rows:
         _warn(f"{table.long_rows} row(s) had more fields than the header; extra fields ignored")
+    if args.sample is not None:
+        for message in apply_sample(table, args.sample):
+            _warn(message)
     return table
 
 
