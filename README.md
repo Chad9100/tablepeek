@@ -345,6 +345,21 @@ id  qty
  2    7
 ```
 
+## Built-in help
+
+Every command has its own `-h` with copy-pasteable examples at the bottom;
+`tablepeek filter -h` ends with:
+
+```text
+examples:
+  tablepeek filter data.csv "age>30 and city=Paris"
+  tablepeek filter data.csv "city in (Paris, Lyon)" -s age:desc -n 5
+  tablepeek filter data.csv "name=~'^[A-C]' and email is not null" --count
+
+expression operators: = != > >= < <= ~ !~ =~ in (...) between X and Y
+  is null, is not null, and/or/not, parentheses, @column on the right side
+```
+
 ## Shell completion
 
 `tablepeek completion SHELL` prints a completion script for `bash`, `zsh` or

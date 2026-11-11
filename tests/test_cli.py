@@ -22,6 +22,31 @@ def people(tmp_path):
     return str(p)
 
 
+@pytest.mark.parametrize(
+    "command", ["head", "schema", "stats", "group", "filter", "sort", "select", "completion"]
+)
+def test_command_help_has_examples(capsys, command):
+    with pytest.raises(SystemExit) as exc:
+        main([command, "-h"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "examples:" in out
+    assert f"tablepeek {command} " in out
+
+
+def test_filter_help_lists_operators(capsys):
+    with pytest.raises(SystemExit):
+        main(["filter", "-h"])
+    out = capsys.readouterr().out
+    assert "between X and Y" in out and "is not null" in out
+
+
+def test_top_level_help_has_examples(capsys):
+    with pytest.raises(SystemExit):
+        main(["-h"])
+    assert "tablepeek group people.csv" in capsys.readouterr().out
+
+
 def run(capsys, *argv):
     code = main(list(argv))
     out, err = capsys.readouterr()

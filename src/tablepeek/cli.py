@@ -95,21 +95,44 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
         description="Inspect and query CSV/TSV files from the terminal.",
-        epilog="Run 'tablepeek COMMAND -h' for the options of each command.",
+        epilog=(
+            "examples:\n"
+            "  tablepeek head people.csv -n 5\n"
+            "  tablepeek filter people.csv \"age>30 and city=Paris\" -c name,age\n"
+            "  tablepeek group people.csv city -a count,mean:score\n"
+            "\n"
+            "Run 'tablepeek COMMAND -h' for the options of each command."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
 
-    p = sub.add_parser("completion", help="print a shell completion script")
+    def add(name, summary, examples, **kwargs):
+        text = "examples:\n" + "".join(f"  tablepeek {line}\n" for line in examples)
+        return sub.add_parser(
+            name, help=summary, description=summary[0].upper() + summary[1:] + ".",
+            epilog=text, formatter_class=argparse.RawDescriptionHelpFormatter, **kwargs,
+        )
+
+    p = add("completion", "print a shell completion script",
+            ["completion bash > ~/.tablepeek-completion"])
     p.add_argument("shell", choices=SHELLS, help="shell to generate the script for")
 
-    p = sub.add_parser("head", parents=[common, rowopts], help="show the first rows (default 10)")
+    p = add("head", "show the first rows (default 10)",
+            ["head data.csv", "head data.csv -n 3 -c name,city -f json",
+             "head data.csv --skip 2 --null - --decimal-comma"],
+            parents=[common, rowopts])
     p.set_defaults(limit_default=10)
 
-    sub.add_parser("schema", parents=[common], help="inferred column types and null counts")
+    add("schema", "inferred column types and null counts",
+        ["schema data.csv", "schema data.csv --sample 1000 -f json"], parents=[common])
 
-    p = sub.add_parser("stats", parents=[common], help="min/max/mean/distinct per column")
+    p = add("stats", "min/max/mean/distinct per column",
+            ["stats data.csv", "stats data.csv -c age,score --hist",
+             "stats data.csv --top 3 -w \"city=Paris\""],
+            parents=[common])
     p.add_argument("-w", "--where", metavar="EXPR", help="summarise only rows matching EXPR")
     p.add_argument("-c", "--columns", metavar="COLS", help="summarise only these columns")
     p.add_argument(
@@ -125,7 +148,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="number of histogram bins (default 8)",
     )
 
-    p = sub.add_parser("group", parents=[common], help="aggregate rows grouped by columns")
+    p = add("group", "aggregate rows grouped by columns",
+            ["group data.csv city", "group data.csv city,active -a count,mean:score,max:age"],
+            parents=[common])
     p.add_argument("keys", help="comma-separated columns to group by, e.g. city,active")
     p.add_argument(
         "-a", "--agg", default="count", metavar="AGGS",
@@ -135,13 +160,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-w", "--where", metavar="EXPR", help="group only rows matching EXPR")
     p.add_argument("-n", "--limit", type=_positive_int, metavar="N", help="output at most N groups")
 
-    p = sub.add_parser("filter", parents=[common, rowopts], help="rows matching an expression")
+    p = add("filter", "rows matching an expression",
+            ["filter data.csv \"age>30 and city=Paris\"",
+             "filter data.csv \"city in (Paris, Lyon)\" -s age:desc -n 5",
+             "filter data.csv \"name=~'^[A-C]' and email is not null\" --count"],
+            parents=[common, rowopts])
+    p.epilog += (
+        "\nexpression operators: = != > >= < <= ~ !~ =~ in (...) between X and Y\n"
+        "  is null, is not null, and/or/not, parentheses, @column on the right side\n"
+    )
     p.add_argument("expr", help="e.g. \"age>30 and city=Paris\"")
 
-    p = sub.add_parser("sort", parents=[common, rowopts], help="rows sorted by columns")
+    p = add("sort", "rows sorted by columns",
+            ["sort data.csv city,age:desc", "sort data.csv score --desc -n 3"],
+            parents=[common, rowopts])
     p.add_argument("keys", help="columns to sort by, e.g. city,age:desc")
 
-    p = sub.add_parser("select", parents=[common, rowopts], help="only some columns")
+    p = add("select", "only some columns",
+            ["select data.csv name,city", "select data.csv 1,3 -f csv --out-delimiter tab"],
+            parents=[common, rowopts])
     p.add_argument("cols", help="comma-separated column names or 1-based numbers")
     return parser
 
