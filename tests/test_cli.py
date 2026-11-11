@@ -28,6 +28,29 @@ def run(capsys, *argv):
     return code, out, err
 
 
+@pytest.mark.parametrize("shell", ["bash", "zsh", "fish"])
+def test_completion_lists_commands_and_options(shell, capsys):
+    code, out, _ = run(capsys, "completion", shell)
+    assert code == 0
+    for word in ("head", "schema", "stats", "group", "filter", "sort", "select"):
+        assert word in out
+    assert "decimal-comma" in out and "dayfirst" in out
+    assert "jsonl" in out  # --format choices
+
+
+def test_completion_bash_is_complete_function(capsys):
+    _, out, _ = run(capsys, "completion", "bash")
+    assert "_tablepeek()" in out
+    assert "complete -o filenames -F _tablepeek tablepeek" in out
+    assert "head:-f|head:--format)" in out
+
+
+def test_completion_rejects_unknown_shell():
+    with pytest.raises(SystemExit) as exc:
+        main(["completion", "tcsh"])
+    assert exc.value.code == 2
+
+
 def test_head_default_and_limit(people, capsys):
     code, out, _ = run(capsys, "head", people)
     assert code == 0

@@ -8,6 +8,7 @@ import os
 import sys
 
 from tablepeek import __version__
+from tablepeek.completion import SHELLS, generate
 from tablepeek.expr import compile_filter
 from tablepeek.ops import (
     agg_name, group_by, parse_agg_spec, parse_sort_spec, schema, sort_rows, stats,
@@ -99,6 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
+
+    p = sub.add_parser("completion", help="print a shell completion script")
+    p.add_argument("shell", choices=SHELLS, help="shell to generate the script for")
 
     p = sub.add_parser("head", parents=[common, rowopts], help="show the first rows (default 10)")
     p.set_defaults(limit_default=10)
@@ -300,7 +304,11 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(errors="replace")
         except (AttributeError, ValueError):
             pass
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "completion":
+        _write(generate(args.shell, parser, PROG))
+        return 0
     try:
         table = _load(args)
         if args.command == "schema":

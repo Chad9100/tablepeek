@@ -47,6 +47,7 @@ Estimates are rough working hours for one person.
 
 - [x] `--out-delimiter` and Markdown table output
 - [ ] Publish to PyPI with a trusted-publishing GitHub workflow
-- [ ] Shell completion scripts and a `--help` review
+- [x] Shell completion scripts (`tablepeek completion bash|zsh|fish`)
+- [ ] A `--help` review
 
 **Total for v0.2 to v1.0: about 20 hours.**

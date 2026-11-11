@@ -32,6 +32,7 @@ tablepeek group  FILE COLS [-a AGGS] [-w EXPR] [-n N]
 tablepeek filter FILE EXPR
 tablepeek sort   FILE COLS
 tablepeek select FILE COLS
+tablepeek completion {bash,zsh,fish}
 ```
 
 `FILE` can be `-` to read standard input. Every command accepts:
@@ -343,6 +344,37 @@ id  qty
  1    5
  2    7
 ```
+
+## Shell completion
+
+`tablepeek completion SHELL` prints a completion script for `bash`, `zsh` or
+`fish`. It is generated from the real option list, so it always matches the
+installed version: it completes subcommands, each subcommand's options, and
+the values of `-f/--format`. Load it from your shell's startup file:
+
+```sh
+# bash (~/.bashrc)
+source <(tablepeek completion bash)
+# zsh: put the output in a file named _tablepeek on your $fpath
+tablepeek completion zsh > ~/.zsh/completions/_tablepeek
+# fish
+tablepeek completion fish > ~/.config/fish/completions/tablepeek.fish
+```
+
+```text
+$ tablepeek completion bash | head -8
+# bash completion for tablepeek
+_tablepeek() {
+    local cur prev cmd i
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    cmd=""
+    for ((i=1; i<COMP_CWORD; i++)); do
+        case "${COMP_WORDS[i]}" in
+```
+
+The bash script was exercised in bash; the zsh and fish scripts are generated
+the same way but have not been tried in those shells yet.
 
 ## Filter expressions
 
