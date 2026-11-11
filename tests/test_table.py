@@ -158,6 +158,32 @@ def test_normalize_decimal_comma():
     assert n("1,2,3") == "1,2,3"
 
 
+def test_dates_detected_day_first():
+    t = parse_text("d\n25/03/2024\n07/03/2024\n\n", ",")
+    assert [r[0] for r in t.rows] == ["2024-03-25", "2024-03-07"]
+
+
+def test_dates_detected_month_first_with_time():
+    t = parse_text("d\n03/25/2024 10:30\n07/03/2024 08:05:09\n", ",")
+    assert [r[0] for r in t.rows] == ["2024-03-25 10:30", "2024-07-03 08:05:09"]
+
+
+def test_dates_ambiguous_need_dayfirst():
+    text = "d\n07/03/2024\n05/04/2024\n"
+    assert parse_text(text, ",").rows == [["07/03/2024"], ["05/04/2024"]]
+    t = parse_text(text, ",", dayfirst=True)
+    assert [r[0] for r in t.rows] == ["2024-03-07", "2024-04-05"]
+
+
+def test_dates_conflicting_or_mixed_columns_untouched():
+    conflict = "d\n25/03/2024\n03/25/2024\n"
+    assert parse_text(conflict, ",", dayfirst=True).rows == [["25/03/2024"], ["03/25/2024"]]
+    mixed = "d\n25/03/2024\nsoon\n"
+    assert parse_text(mixed, ",", dayfirst=True).rows == [["25/03/2024"], ["soon"]]
+    bad = "d\n31/02/2024\n"
+    assert parse_text(bad, ",", dayfirst=True).rows == [["31/02/2024"]]
+
+
 def test_parse_text_decimal_comma():
     t = parse_text("a;b\n1.234,5;x\n2,5;y\n", ";", decimal_comma=True)
     assert t.rows == [["1234.5", "x"], ["2.5", "y"]]

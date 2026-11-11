@@ -300,6 +300,16 @@ def test_stats_hist_rejects_csv(people, capsys):
     assert "--hist" in err
 
 
+def test_dayfirst_cli(tmp_path, capsys):
+    p = tmp_path / "o.csv"
+    p.write_text("a,b\n25/03/2024,07/03/2024\n01/04/2024,05/04/2024\n", encoding="utf-8")
+    code, out, _ = run(capsys, "schema", str(p), "-f", "jsonl")
+    types = [json.loads(line)["type"] for line in out.splitlines()]
+    assert types == ["date", "text"]
+    code, out, _ = run(capsys, "filter", str(p), "b > 2024-03-31", "--dayfirst", "-f", "csv")
+    assert out.splitlines() == ["a,b", "2024-04-01,2024-04-05"]
+
+
 def test_decimal_comma_cli(tmp_path, capsys):
     p = tmp_path / "eu.csv"
     p.write_text("n;v\na;1.234,5\nb;39,9\nc;1.050\n", encoding="utf-8")

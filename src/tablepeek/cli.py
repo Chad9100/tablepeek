@@ -56,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="read European numbers (1.234,5) as 1234.5; thousands dots are removed",
     )
     common.add_argument(
+        "--dayfirst", action="store_true",
+        help="read ambiguous dates like 07/03/2024 as day/month (default: only "
+             "columns where the order is clear from the data are converted)",
+    )
+    common.add_argument(
         "-f", "--format", choices=FORMATS, default="table",
         help="output format (default: table)",
     )
@@ -143,6 +148,7 @@ def _load(args) -> Table:
         skip=args.skip,
         null_tokens=args.null_tokens,
         decimal_comma=args.decimal_comma,
+        dayfirst=args.dayfirst,
     )
     if table.long_rows:
         _warn(f"{table.long_rows} row(s) had more fields than the header; extra fields ignored")

@@ -23,7 +23,7 @@ Estimates are rough working hours for one person.
 
 ## v0.3: more input formats (about 4 h)
 
-- [ ] Day-first and month-first dates (`07/03/2024`) with a `--dayfirst`
+- [x] Day-first and month-first dates (`07/03/2024`) with a `--dayfirst`
       switch, and detection when the column is unambiguous
 - [x] Thousands separators and decimal commas (`1.234,5`) for European files
       (`--decimal-comma`)

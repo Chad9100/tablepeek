@@ -43,6 +43,7 @@ tablepeek select FILE COLS
 | `--no-header` | the first line is data; columns become `col1`, `col2`, ... |
 | `--skip N` | ignore the first N lines, for files with a preamble before the header |
 | `--decimal-comma` | read European numbers (`1.234,5`) as `1234.5`; thousands dots are removed |
+| `--dayfirst` | read ambiguous slash dates such as `07/03/2024` as day/month (see below) |
 | `--null TOKEN` | also treat cells equal to TOKEN (for example `-` or `?`) as null; repeat for several tokens. Matching nulls show as empty cells |
 | `-f, --format F` | `table` (default), `csv`, `md` (Markdown table), `json` or `jsonl` |
 | `--out-delimiter C` | delimiter for `-f csv` output (default comma; `tab`, `semicolon`, `pipe` also accepted) |
@@ -222,6 +223,40 @@ produkt    preis  menge
 -------  -------  -----
 Stuhl    1234.50      3
 Tisch    2480.00      1
+```
+
+Day-first and month-first dates. Columns of `dd/mm/yyyy` or `mm/dd/yyyy`
+values (`/`, `.` or `-` separators, optional time) are rewritten as ISO dates
+when the order is clear from the data: `25/03/2024` can only be day-first. If
+every value in a column is ambiguous (`07/04/2024`), it stays text until you
+pass `--dayfirst`. Columns that fit neither order, or mix in other text, are
+never changed. In `examples/orders.csv`, `shipped` is detected on its own
+while `due` needs the switch:
+
+```text
+$ tablepeek schema examples/orders.csv
+examples/orders.csv: 4 rows, 3 columns, delimiter comma, encoding utf-8
+
+#  column   type  non_null  nulls  example
+-  -------  ----  --------  -----  ----------
+1  order    text         4      0  A1
+2  shipped  date         3      1  2024-03-25
+3  due      text         4      0  07/04/2024
+
+$ tablepeek schema examples/orders.csv --dayfirst
+examples/orders.csv: 4 rows, 3 columns, delimiter comma, encoding utf-8
+
+#  column   type  non_null  nulls  example
+-  -------  ----  --------  -----  ----------
+1  order    text         4      0  A1
+2  shipped  date         3      1  2024-03-25
+3  due      date         4      0  2024-04-07
+
+$ tablepeek filter examples/orders.csv "due < 2024-04-04" --dayfirst
+order  shipped     due
+-----  ----------  ----------
+A3     2024-03-12  2024-04-01
+A4                 2024-04-03
 ```
 
 With `--decimal-comma`, a lone dotted group such as `1.050` is read as the

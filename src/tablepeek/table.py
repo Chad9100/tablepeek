@@ -12,6 +12,7 @@ import io
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -188,6 +189,62 @@ def normalize_decimal_comma(cell: str) -> str:
     return f"{out}.{frac}" if frac is not None else out
 
 
+_SLASH_DATE_RE = re.compile(
+    r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})((?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?)"
+)
+
+
+def _iso_date(day: int, month: int, year: int, rest: str) -> str | None:
+    try:
+        datetime(year, month, day)
+    except ValueError:
+        return None
+    out = f"{year:04d}-{month:02d}-{day:02d}"
+    return out + (" " + rest[1:] if rest else "")
+
+
+def normalize_dates(table: "Table", dayfirst: bool = False) -> None:
+    """Rewrite ``07/03/2024``-style columns as ISO dates, in place.
+
+    A column is converted only when every non-empty cell matches. The order
+    is detected from the data: a value like ``25/03/2024`` can only be
+    day-first, ``03/25/2024`` only month-first. If both orders fit (every
+    value is ambiguous) the column is left alone unless ``dayfirst`` is set,
+    which then wins. Columns where neither order fits stay as they are.
+    """
+    for i in range(len(table.columns)):
+        parsed = []
+        for row in table.rows:
+            cell = row[i].strip()
+            if not cell:
+                continue
+            m = _SLASH_DATE_RE.fullmatch(cell)
+            if not m:
+                parsed = []
+                break
+            parsed.append((int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)))
+        if not parsed:
+            continue
+        as_day = all(_iso_date(a, b, y, r) for a, b, y, r in parsed)
+        as_month = all(_iso_date(b, a, y, r) for a, b, y, r in parsed)
+        if as_day and as_month:
+            if not dayfirst:
+                continue
+            order = "day"
+        elif as_day:
+            order = "day"
+        elif as_month:
+            order = "month"
+        else:
+            continue
+        for row in table.rows:
+            m = _SLASH_DATE_RE.fullmatch(row[i].strip())
+            if not m:
+                continue
+            a, b, y, r = int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)
+            row[i] = _iso_date(a, b, y, r) if order == "day" else _iso_date(b, a, y, r)
+
+
 def parse_text(
     text: str,
     delimiter: str,
@@ -196,6 +253,7 @@ def parse_text(
     source: str = "<stdin>",
     null_tokens: Sequence[str] = (),
     decimal_comma: bool = False,
+    dayfirst: bool = False,
 ) -> Table:
     """Parse decoded text into a Table. Blank lines are skipped.
 
@@ -235,6 +293,7 @@ def parse_text(
         if decimal_comma:
             row = [normalize_decimal_comma(cell) for cell in row]
         table.rows.append(row)
+    normalize_dates(table, dayfirst)
     return table
 
 
@@ -247,6 +306,7 @@ def load(
     skip: int = 0,
     null_tokens: Sequence[str] = (),
     decimal_comma: bool = False,
+    dayfirst: bool = False,
 ) -> Table:
     """Read ``path`` (``-`` for stdin) into a Table."""
     if path == "-":
@@ -276,4 +336,5 @@ def load(
     else:
         delim = parse_delimiter(delimiter)
     return parse_text(text, delim, header=header, encoding=used, source=source,
-                      null_tokens=null_tokens, decimal_comma=decimal_comma)
+                      null_tokens=null_tokens, decimal_comma=decimal_comma,
+                      dayfirst=dayfirst)
