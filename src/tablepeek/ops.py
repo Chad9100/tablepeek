@@ -75,16 +75,34 @@ def schema(table: Table) -> list[dict]:
     return out
 
 
+def histogram(values: list[float], bins: int) -> list[dict]:
+    """Equal-width bins over min..max; the last bin includes the maximum."""
+    lo, hi = min(values), max(values)
+    if lo == hi:
+        return [{"from": lo, "to": hi, "count": len(values)}]
+    width = (hi - lo) / bins
+    counts = [0] * bins
+    for v in values:
+        counts[min(int((v - lo) / width), bins - 1)] += 1
+    return [
+        {"from": lo + i * width, "to": hi if i == bins - 1 else lo + (i + 1) * width, "count": n}
+        for i, n in enumerate(counts)
+    ]
+
+
 def stats(
     table: Table,
     rows: list[list[str]],
     indices: list[int] | None = None,
     top: int = 0,
+    bins: int = 0,
 ) -> list[dict]:
     """Per-column count, nulls, distinct, min, max and (numeric) mean.
 
     With ``top`` > 0 each record also gets a ``top`` list of the most
     frequent ``{"value", "count"}`` pairs (ties keep first-seen order).
+    With ``bins`` > 0 numeric columns also get a ``hist`` list of
+    ``{"from", "to", "count"}`` equal-width bins.
     """
     if indices is None:
         indices = list(range(len(table.columns)))
@@ -121,6 +139,8 @@ def stats(
             record["min"], record["max"] = values[lo], values[hi]
             if kind in ("int", "float"):
                 record["mean"] = sum(values) / len(values)
+                if bins > 0:
+                    record["hist"] = histogram(values, bins)
         out.append(record)
     return out
 

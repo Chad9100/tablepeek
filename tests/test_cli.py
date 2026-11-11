@@ -275,3 +275,26 @@ def test_skip_too_many_lines_is_an_error(people, capsys):
     code, _, err = run(capsys, "head", people, "--skip", "99")
     assert code == 2
     assert "--skip 99 leaves no data" in err
+
+
+def test_stats_hist_table(people, capsys):
+    code, out, _ = run(capsys, "stats", people, "-c", "age", "--hist", "--bins", "2")
+    assert code == 0
+    assert "\nage\n" in out
+    assert "27 .. 34  2  " in out
+    assert "#" in out
+
+
+def test_stats_hist_json_only_numeric(people, capsys):
+    code, out, _ = run(capsys, "stats", people, "-c", "name,age", "--hist", "--bins", "3", "-f", "json")
+    assert code == 0
+    recs = {r["column"]: r for r in json.loads(out)}
+    assert "hist" not in recs["name"]
+    assert sum(b["count"] for b in recs["age"]["hist"]) == 4
+    assert len(recs["age"]["hist"]) == 3
+
+
+def test_stats_hist_rejects_csv(people, capsys):
+    code, _, err = run(capsys, "stats", people, "--hist", "-f", "csv")
+    assert code == 2
+    assert "--hist" in err

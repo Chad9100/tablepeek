@@ -93,3 +93,17 @@ def test_stats_subset_and_empty(table):
         {"column": "age", "type": "int", "count": 0, "nulls": 0, "distinct": 0,
          "min": None, "max": None, "mean": None}
     ]
+
+
+def test_histogram_bins_and_max_in_last_bin():
+    from tablepeek.ops import histogram
+
+    h = histogram([0, 1, 2, 3, 4, 10], 2)
+    assert [b["count"] for b in h] == [5, 1]
+    assert h[0]["from"] == 0 and h[-1]["to"] == 10
+
+
+def test_histogram_constant_column_is_one_bin():
+    from tablepeek.ops import histogram
+
+    assert histogram([5, 5, 5], 4) == [{"from": 5, "to": 5, "count": 3}]

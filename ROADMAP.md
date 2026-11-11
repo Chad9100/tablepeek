@@ -40,7 +40,7 @@ Estimates are rough working hours for one person.
 
 - [x] `tablepeek group FILE city --agg count,mean:score,max:age`
 - [x] `stats --top N` showing the most frequent values per column
-- [ ] Histogram bars for numeric columns in `stats --hist`
+- [x] Histogram bars for numeric columns in `stats --hist`
 
 ## v1.0: release (about 3 h)
 

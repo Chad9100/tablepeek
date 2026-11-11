@@ -27,7 +27,7 @@ That puts a `tablepeek` command on your PATH. `python -m tablepeek` works too.
 ```text
 tablepeek head   FILE [-n N]
 tablepeek schema FILE
-tablepeek stats  FILE [-c COLS] [-w EXPR] [--top N]
+tablepeek stats  FILE [-c COLS] [-w EXPR] [--top N] [--hist [--bins N]]
 tablepeek group  FILE COLS [-a AGGS] [-w EXPR] [-n N]
 tablepeek filter FILE EXPR
 tablepeek sort   FILE COLS
@@ -62,6 +62,24 @@ one command can filter, sort and pick columns at once:
 `stats --top N` adds a `top` column with the N most frequent values and their
 counts (ties keep first-seen order). In `json`/`jsonl` output `top` is a list
 of `{"value", "count"}` objects.
+
+`stats --hist` draws an equal-width histogram (`--bins N`, default 8) for each
+numeric column after the summary table; the last bin includes the maximum. It
+works with table output, and in `json`/`jsonl` output numeric columns get a
+`hist` list of `{"from", "to", "count"}`.
+
+```text
+$ tablepeek stats examples/people.csv -c age --hist --bins 4
+column  type  count  nulls  distinct  min  max     mean
+------  ----  -----  -----  --------  ---  ---  -------
+age     int       7      1         7   27   52  35.8571
+
+age
+  27 .. 33.25  3  ##############################
+33.25 .. 39.5  2  ####################
+39.5 .. 45.75  1  ##########
+  45.75 .. 52  1  ##########
+```
 
 They are applied in that order: filter, sort, limit, then columns. Errors
 (unknown column, bad expression, unreadable file) go to stderr with exit

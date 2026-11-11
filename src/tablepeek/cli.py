@@ -96,6 +96,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--top", type=_positive_int, default=0, metavar="N",
         help="also show the N most frequent values per column",
     )
+    p.add_argument(
+        "--hist", action="store_true",
+        help="show a histogram for each numeric column (table or json output)",
+    )
+    p.add_argument(
+        "--bins", type=_positive_int, default=8, metavar="N",
+        help="number of histogram bins (default 8)",
+    )
 
     p = sub.add_parser("group", parents=[common], help="aggregate rows grouped by columns")
     p.add_argument("keys", help="comma-separated columns to group by, e.g. city,active")
@@ -198,7 +206,14 @@ def _stats_command(args, table: Table) -> str:
         pred = compile_filter(args.where, table)
         rows = [r for r in rows if pred(r)]
     indices = table.resolve_list(args.columns) if args.columns else None
-    records = stats(table, rows, indices, args.top)
+    if args.hist and args.format not in ("table", "json", "jsonl"):
+        raise TableError("--hist works with table, json or jsonl output")
+    if args.hist and args.bins < 1:
+        raise TableError("--bins must be at least 1")
+    records = stats(table, rows, indices, args.top, args.bins if args.hist else 0)
+    hists = []
+    if args.format == "table":
+        hists = [(r["column"], r.pop("hist")) for r in records if "hist" in r]
     if args.top and args.format in ("table", "csv"):
         for rec in records:
             rec["top"] = ", ".join(
@@ -210,9 +225,25 @@ def _stats_command(args, table: Table) -> str:
             k for k in ("min", "max")
             if records and all(r["type"] in ("int", "float") for r in records)
         )
-    return render_summary(
+    text = render_summary(
         args.format, records, right, args.max_width, parse_delimiter(args.out_delimiter)
     )
+    if args.hist and args.format == "table":
+        text += "".join(_hist_block(name, h) for name, h in hists)
+    return text
+
+
+def _hist_block(name: str, bins: list[dict]) -> str:
+    labels = [
+        f"{format_value(b['from'])} .. {format_value(b['to'])}" for b in bins
+    ]
+    counts = [b["count"] for b in bins]
+    lw, cw, peak = max(map(len, labels)), max(len(str(c)) for c in counts), max(counts)
+    lines = [f"\n{name}\n"]
+    for label, n in zip(labels, counts):
+        bar = "#" * (max(1, round(n / peak * 30)) if n else 0)
+        lines.append(f"{label:>{lw}}  {n:>{cw}}  {bar}".rstrip() + "\n")
+    return "".join(lines)
 
 
 def _group_command(args, table: Table) -> str:
