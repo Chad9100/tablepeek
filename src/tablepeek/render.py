@@ -90,10 +90,13 @@ def render_markdown(
     return "\n".join(out) + "\n"
 
 
-def render_csv(columns: list[str], rows: list[list[str]], delimiter: str = ",") -> str:
+def render_csv(
+    columns: list[str], rows: list[list[str]], delimiter: str = ",", header: bool = True
+) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=delimiter, lineterminator="\n")
-    writer.writerow(columns)
+    if header:
+        writer.writerow(columns)
     writer.writerows(rows)
     return buf.getvalue()
 

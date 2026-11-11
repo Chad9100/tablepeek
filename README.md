@@ -51,6 +51,9 @@ tablepeek completion {bash,zsh,fish}
 | `--out-delimiter C` | delimiter for `-f csv` output (default comma; `tab`, `semicolon`, `pipe` also accepted) |
 | `--max-width N` | clip table cells wider than N characters (default 40, `0` = never) |
 
+`head`, `filter` and `select` also take `--stream` (see "Streaming large
+files").
+
 The row commands (`head`, `filter`, `sort`, `select`) share these options, so
 one command can filter, sort and pick columns at once:
 
@@ -456,6 +459,30 @@ mixed.csv: 5 rows, 3 columns, delimiter comma, encoding utf-8
 2  qty     int          2      3  5
 3  note    text         5      0  a
 ```
+
+## Streaming large files
+
+`head`, `filter` and `select` accept `--stream`. The file is then read row by
+row instead of being loaded into memory, and reading stops as soon as `-n`
+rows have been produced. Column types come from the first `--sample N` rows
+(default 1000), with the same warning as above for later values that do not
+fit. `-f csv` and `-f jsonl` print rows as they are found; the other formats
+collect the (limited) result first. `--stream` cannot sort, and slash dates
+such as `07/03/2024` are not converted, because both need the whole file.
+Encoding and delimiter are detected from the first 64 KB (use `-e` if a later
+row breaks the guess). Real output on a generated 2,000,000-row, 39 MB file:
+
+```text
+$ tablepeek filter big.csv "city=Nice and amount>970" -n 2 --stream
+ id  city  amount
+---  ----  ------
+971  Nice   971.5
+974  Nice   974.5
+```
+
+That command returned in about 0.13 s on a Windows laptop because it stopped
+after the second match; `--count --stream` has to read every row (about 9 s
+for the same file, 4776 matches) but keeps only the sample rows in memory, not the file.
 
 ## How detection works
 

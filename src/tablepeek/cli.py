@@ -13,9 +13,10 @@ from tablepeek.expr import compile_filter
 from tablepeek.ops import (
     agg_name, group_by, parse_agg_spec, parse_sort_spec, schema, sort_rows, stats,
 )
-from tablepeek.render import FORMATS, format_value, render_rows, render_summary
+from tablepeek.render import FORMATS, format_value, render_csv, render_rows, render_summary
 from tablepeek.table import (
-    DELIMITER_NAMES, Table, TableError, apply_sample, load, parse_delimiter,
+    DELIMITER_NAMES, STREAM_SAMPLE, Table, TableError, apply_sample, load,
+    open_stream, parse_delimiter,
 )
 
 PROG = "tablepeek"
@@ -91,6 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
     rowopts.add_argument("-c", "--columns", metavar="COLS", help="output only these columns")
     rowopts.add_argument("-n", "--limit", type=_positive_int, metavar="N", help="output at most N rows")
     rowopts.add_argument("--count", action="store_true", help="print only the number of matching rows")
+    rowopts.add_argument(
+        "--stream", action="store_true",
+        help="read the file row by row instead of loading it (head, filter, select; "
+             "stops early at -n; types come from the first --sample rows, default 1000; "
+             "no sorting, and slash dates are not converted)",
+    )
 
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -233,6 +240,61 @@ def _rows_command(args, table: Table) -> str:
     )
 
 
+def _stream_command(args):
+    """Yield output text for head/filter/select without loading the file."""
+    if args.command == "sort" or args.sort or args.desc:
+        raise TableError("--stream cannot sort; drop --stream or the sort option")
+    where = [e for e in (getattr(args, "expr", None), args.where) if e]
+    col_spec = getattr(args, "cols", None) or args.columns
+    limit = args.limit if args.limit is not None else getattr(args, "limit_default", None)
+    stream = open_stream(
+        args.file,
+        delimiter=args.delimiter,
+        encoding=args.encoding,
+        header=not args.no_header,
+        skip=args.skip,
+        null_tokens=args.null_tokens,
+        decimal_comma=args.decimal_comma,
+        sample=args.sample if args.sample is not None else STREAM_SAMPLE,
+    )
+    table = stream.table
+    try:
+        preds = [compile_filter(expr, table) for expr in where]
+        indices = table.resolve_list(col_spec) if col_spec else list(range(len(table.columns)))
+        columns = [table.columns[i] for i in indices]
+        kinds = [table.kinds[i] for i in indices]
+        delim = parse_delimiter(args.out_delimiter)
+        live = args.format in ("csv", "jsonl") and not args.count
+        out, count = [], 0
+        if live and args.format == "csv":
+            yield render_csv(columns, [], delim)
+        for row in stream:
+            if limit is not None and not args.count and count >= limit:
+                break
+            if all(p(row) for p in preds):
+                count += 1
+                if args.count:
+                    continue
+                picked = [row[i] for i in indices]
+                if live:
+                    if args.format == "csv":
+                        yield render_csv(columns, [picked], delim, header=False)
+                    else:
+                        yield render_rows("jsonl", columns, [picked], kinds)
+                else:
+                    out.append(picked)
+        if args.count:
+            yield f"{count}\n"
+        elif not live:
+            yield render_rows(args.format, columns, out, kinds, args.max_width, delim)
+    finally:
+        stream.close()
+    if table.long_rows:
+        _warn(f"{table.long_rows} row(s) had more fields than the header; extra fields ignored")
+    for message in stream.warnings():
+        _warn(message)
+
+
 def _describe(table: Table) -> str:
     delim = DELIMITER_NAMES.get(table.delimiter, repr(table.delimiter))
     return (
@@ -347,6 +409,10 @@ def main(argv: list[str] | None = None) -> int:
         _write(generate(args.shell, parser, PROG))
         return 0
     try:
+        if getattr(args, "stream", False):
+            for chunk in _stream_command(args):
+                _write(chunk)
+            return 0
         table = _load(args)
         if args.command == "schema":
             text = _schema_command(args, table)

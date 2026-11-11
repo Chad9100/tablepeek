@@ -335,6 +335,197 @@ def apply_sample(table: Table, sample: int) -> list[str]:
     return warnings
 
 
+STREAM_SAMPLE = 1000
+
+
+class RowStream:
+    """Rows read lazily from a file: a Table holding the first rows plus the rest.
+
+    ``table`` has the sample rows and the column types inferred from them.
+    Iterating the object yields every row (sample first). Later cells that do
+    not fit their column's inferred type become empty strings and are counted
+    in ``misfits``; ``warnings()`` describes them once iteration is over.
+    """
+
+    def __init__(self, table: Table, rest, handle, sample: int, bad: dict):
+        self.table = table
+        self._rest = rest
+        self._handle = handle
+        self._sample = sample
+        self.misfits = bad
+
+    def __iter__(self):
+        try:
+            yield from self.table.rows
+            yield from self._rest
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        self._handle.close()
+
+    def warnings(self) -> list[str]:
+        out = []
+        for i, (count, first) in sorted(self.misfits.items()):
+            out.append(
+                f"column {self.table.columns[i]!r} was inferred as {self.table.kinds[i]} "
+                f"from the first {self._sample} rows, but {count} later value(s) do not "
+                f"fit (first: {first[1]!r} in data row {first[0]}); treated as null"
+            )
+        return out
+
+
+def open_stream(
+    path: str,
+    delimiter: str | None = None,
+    encoding: str | None = None,
+    header: bool = True,
+    stdin=None,
+    skip: int = 0,
+    null_tokens: Sequence[str] = (),
+    decimal_comma: bool = False,
+    sample: int = STREAM_SAMPLE,
+) -> RowStream:
+    """Open ``path`` (``-`` for stdin) without reading it all into memory.
+
+    Encoding and delimiter are detected from the first 64 KB; column types
+    come from the first ``sample`` rows. Slash-style dates (``07/03/2024``)
+    are not rewritten in this mode because that needs the whole column.
+    """
+    from tablepeek.infer import convert, infer_column
+
+    if sample < 1:
+        raise TableError("--sample must be at least 1")
+    if path == "-":
+        raw = stdin if stdin is not None else sys.stdin.buffer
+        if not hasattr(raw, "peek"):
+            raw = io.BufferedReader(raw) if isinstance(raw, io.RawIOBase) else io.BufferedReader(
+                io.BytesIO(raw.read()))
+        source, preferred = "<stdin>", ","
+    else:
+        p = Path(path)
+        try:
+            raw = open(p, "rb", buffering=1 << 17)
+        except FileNotFoundError:
+            raise TableError(f"no such file: {path}") from None
+        except (IsADirectoryError, PermissionError):
+            if p.is_dir():
+                raise TableError(f"is a directory: {path}") from None
+            raise TableError(f"permission denied: {path}") from None
+        source = path
+        preferred = "\t" if p.suffix.lower() in (".tsv", ".tab") else ","
+    try:
+        head = raw.peek(SNIFF_BYTES)[:SNIFF_BYTES]
+        if encoding:
+            used = encoding
+            try:
+                codecs.lookup(used)
+            except LookupError:
+                raise TableError(f"unknown encoding: {encoding}") from None
+        elif head.startswith(codecs.BOM_UTF8):
+            used = "utf-8-sig"
+        elif head.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+            used = "utf-16"
+        else:
+            used = "utf-8"
+            try:
+                codecs.getincrementaldecoder("utf-8")().decode(head, final=False)
+            except UnicodeDecodeError:
+                used = "cp1252"
+        if used.lower().replace("_", "-") == "utf-8":
+            used = "utf-8-sig"  # also drops a BOM if an explicit utf-8 file has one
+        text = io.TextIOWrapper(raw, encoding=used, newline="", errors="strict")
+        sniff = codecs.getincrementaldecoder(used)("replace").decode(head, final=False)
+        if skip:
+            try:
+                sniff = skip_lines(sniff, skip, source)
+            except TableError:
+                pass
+            for _ in range(skip):
+                if not text.readline():
+                    raise TableError(f"{source}: --skip {skip} leaves no data")
+        delim = parse_delimiter(delimiter) if delimiter else sniff_delimiter(sniff, preferred)
+    except BaseException:
+        raw.close() if path != "-" else None
+        raise
+
+    extra = frozenset(null_tokens)
+    reader = csv.reader(text, delimiter=delim)
+    state = {"long": 0, "short": 0}
+
+    def records():
+        try:
+            for row in reader:
+                if row:
+                    yield row
+        except csv.Error as exc:
+            raise TableError(f"{source}: line {reader.line_num}: {exc}") from None
+        except UnicodeDecodeError as exc:
+            raise TableError(
+                f"{source}: cannot decode as {used}: {exc.reason} at byte {exc.start} "
+                "(streaming detects the encoding from the first 64 KB; pass -e)"
+            ) from None
+
+    source_rows = records()
+    first = next(source_rows, None)
+    if first is None:
+        raise TableError(f"{source}: no data (file is empty)")
+    if header:
+        columns = _clean_header(first)
+    else:
+        columns = [f"col{i}" for i in range(1, len(first) + 1)]
+        source_rows = _chain_first(first, source_rows)
+    width = len(columns)
+    table = Table(columns, [], delimiter=delim, encoding=used, source=source)
+
+    def cleaned():
+        for row in source_rows:
+            if len(row) < width:
+                row = row + [""] * (width - len(row))
+                table.short_rows += 1
+            elif len(row) > width:
+                if any(cell.strip() for cell in row[width:]):
+                    table.long_rows += 1
+                row = row[:width]
+            if extra:
+                row = ["" if cell.strip() in extra else cell for cell in row]
+            if decimal_comma:
+                row = [normalize_decimal_comma(cell) for cell in row]
+            yield row
+
+    rows = cleaned()
+    for row in rows:
+        table.rows.append(row)
+        if len(table.rows) >= sample:
+            break
+    table._kinds = [
+        infer_column(row[i] for row in table.rows) for i in range(width)
+    ]
+    bad: dict[int, tuple[int, tuple[int, str]]] = {}
+
+    def rest():
+        n = len(table.rows)
+        for row in rows:
+            n += 1
+            for i, kind in enumerate(table._kinds):
+                if kind == "text":
+                    continue
+                try:
+                    convert(row[i], kind)
+                except ValueError:
+                    count, first_bad = bad.get(i, (0, (n, row[i])))
+                    bad[i] = (count + 1, first_bad)
+                    row[i] = ""
+            yield row
+
+    return RowStream(table, rest(), text, sample, bad)
+
+
+def _chain_first(first, rest):
+    yield first
+    yield from rest
+
+
 def load(
     path: str,
     delimiter: str | None = None,

@@ -32,7 +32,8 @@ Estimates are rough working hours for one person.
 
 ## v0.4: large files (about 5 h)
 
-- [ ] Stream `head`, `filter` and `select` instead of loading the whole file
+- [x] Stream `head`, `filter` and `select` instead of loading the whole file
+      (`--stream`; streaming `stats` and `group` is still open)
 - [x] Infer types from a sample (`--sample N`) with a clear warning when a
       later value breaks the inferred type
 - [ ] Benchmark on a 1 GB synthetic file and document the numbers
