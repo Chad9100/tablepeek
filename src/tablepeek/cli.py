@@ -11,7 +11,7 @@ from tablepeek import __version__
 from tablepeek.completion import SHELLS, generate
 from tablepeek.expr import compile_filter
 from tablepeek.ops import (
-    agg_name, group_by, parse_agg_spec, parse_sort_spec, schema, sort_rows, stats,
+    agg_name, duplicates, group_by, parse_agg_spec, parse_sort_spec, schema, sort_rows, stats,
 )
 from tablepeek.render import FORMATS, format_value, render_csv, render_rows, render_summary
 from tablepeek.table import (
@@ -174,6 +174,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-w", "--where", metavar="EXPR", help="group only rows matching EXPR")
     p.add_argument("-n", "--limit", type=_positive_int, metavar="N", help="output at most N groups")
     p.add_argument("--stream", action="store_true", help=STREAM_SUMMARY_HELP)
+
+    p = add("dupes", "values or rows that occur more than once",
+            ["dupes data.csv email", "dupes data.csv city,active -n 5", "dupes data.csv"],
+            parents=[common])
+    p.add_argument(
+        "keys", nargs="?", default=None,
+        help="comma-separated columns that define a duplicate (default: all columns)",
+    )
+    p.add_argument("-w", "--where", metavar="EXPR", help="look only at rows matching EXPR")
+    p.add_argument("-n", "--limit", type=_positive_int, metavar="N", help="output at most N duplicates")
+    p.add_argument(
+        "--count", action="store_true",
+        help="print only the number of duplicated keys",
+    )
 
     p = add("filter", "rows matching an expression",
             ["filter data.csv \"age>30 and city=Paris\"",
@@ -433,6 +447,23 @@ def _group_command(args, table: Table, rows=None) -> str:
     )
 
 
+def _dupes_command(args, table: Table) -> str:
+    rows = table.rows
+    if args.where:
+        pred = compile_filter(args.where, table)
+        rows = [r for r in rows if pred(r)]
+    keys = table.resolve_list(args.keys) if args.keys else list(range(len(table.columns)))
+    records = duplicates(table, rows, keys)
+    if args.count:
+        return f"{len(records)}\n"
+    if args.limit is not None:
+        records = records[: args.limit]
+    right = ("count",) + tuple(table.columns[i] for i in keys if table.kinds[i] in ("int", "float"))
+    return render_summary(
+        args.format, records, right, args.max_width, parse_delimiter(args.out_delimiter)
+    )
+
+
 def _write(text: str) -> None:
     try:
         sys.stdout.write(text)
@@ -469,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
                 text = _group_command(args, table)
             elif args.command == "stats":
                 text = _stats_command(args, table)
+            elif args.command == "dupes":
+                text = _dupes_command(args, table)
             else:
                 text = _rows_command(args, table)
     except TableError as exc:

@@ -258,6 +258,20 @@ def group_by(
     return out
 
 
+def duplicates(
+    table: Table, rows: list[list[str]], key_indices: list[int]
+) -> list[dict]:
+    """Key combinations that occur more than once, with their row counts.
+
+    Most frequent first; ties keep first-seen order. A null key cell counts
+    as an empty value, so two rows with an empty key are duplicates.
+    """
+    groups = group_by(table, rows, key_indices, [("count", None)])
+    dupes = [g for g in groups if g["count"] > 1]
+    dupes.sort(key=lambda g: -g["count"])
+    return dupes
+
+
 def _distinct_key(value):
     if isinstance(value, str):
         return value.strip()

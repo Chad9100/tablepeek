@@ -29,6 +29,7 @@ tablepeek head   FILE [-n N]
 tablepeek schema FILE
 tablepeek stats  FILE [-c COLS] [-w EXPR] [--top N] [--hist [--bins N]]
 tablepeek group  FILE COLS [-a AGGS] [-w EXPR] [-n N]
+tablepeek dupes  FILE [COLS] [-w EXPR] [-n N] [--count]
 tablepeek filter FILE EXPR
 tablepeek sort   FILE COLS
 tablepeek select FILE COLS
@@ -168,6 +169,25 @@ $ tablepeek group examples/people.csv active,city -a sum:score -f md
 | false | Paris | 79 |
 | true | Marseille | 65.5 |
 | true | Rome | 84 |
+```
+
+Finding duplicates (`dupes`). Lists the values of the given columns (default:
+all columns) that occur more than once, most frequent first, with how many
+rows share them. A null key counts as an empty value. `--count` prints just
+the number of duplicated keys:
+
+```text
+$ tablepeek dupes examples/people.csv city
+city   count
+-----  -----
+Paris      3
+Lyon       2
+
+$ tablepeek dupes examples/people.csv city,active
+city   active  count
+-----  ------  -----
+Paris  true        2
+Lyon   false       2
 ```
 
 Custom null tokens (`--null`). In `examples/dashes.csv` a dash marks a missing
@@ -526,7 +546,7 @@ amount  float  1000000      0      1000    0  499.5  249.75
 
 ## Features
 
-- `head`, `schema`, `stats`, `group`, `filter`, `sort`, `select` subcommands
+- `head`, `schema`, `stats`, `group`, `dupes`, `filter`, `sort`, `select` subcommands
 - Type inference (int/float/date/bool/text) with null counts
 - Per-column count, nulls, distinct, min, max and mean
 - Filter expressions with typed comparisons, `and`/`or`/`not`, parentheses,

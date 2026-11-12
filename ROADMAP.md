@@ -54,4 +54,11 @@ Estimates are rough working hours for one person.
 - [x] A `--help` review (examples in every command's help, operator summary
       in `filter -h`)
 
+## v1.1: data quality (about 5 h)
+
+- [x] `tablepeek dupes FILE [COLS]` lists duplicated keys with counts
+- [ ] `--stream` for `dupes` (needs a bounded-memory counter)
+- [ ] `tablepeek diff A.csv B.csv --key id` showing added/removed/changed rows
+- [ ] `tablepeek sample FILE -n N` random sample with a `--seed`
+
 **Total for v0.2 to v1.0: about 20 hours.**
