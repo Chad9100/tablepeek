@@ -106,41 +106,54 @@ def stats(
     """
     if indices is None:
         indices = list(range(len(table.columns)))
-    out = []
-    for i in indices:
-        kind = table.kinds[i]
-        values = []
-        nulls = 0
-        for row in rows:
+    # One pass over ``rows`` (any iterable) with running accumulators, so the
+    # rows never have to be held in memory. Only histograms keep the values.
+    accs = [
+        {"n": 0, "nulls": 0, "counts": Counter(), "lo": None, "hi": None,
+         "lokey": None, "hikey": None, "sum": 0,
+         "values": [] if bins > 0 and table.kinds[i] in ("int", "float") else None}
+        for i in indices
+    ]
+    for row in rows:
+        for i, acc in zip(indices, accs):
             cell = row[i]
             if is_null(cell):
-                nulls += 1
+                acc["nulls"] += 1
                 continue
-            values.append(convert(cell, kind))
-        counts = Counter(_distinct_key(v) for v in values)
+            kind = table.kinds[i]
+            v = convert(cell, kind)
+            acc["n"] += 1
+            acc["counts"][_distinct_key(v)] += 1
+            key = _sort_value(v, "text") if isinstance(v, str) else v
+            if acc["lokey"] is None or key < acc["lokey"]:
+                acc["lo"], acc["lokey"] = v, key
+            if acc["hikey"] is None or key > acc["hikey"]:
+                acc["hi"], acc["hikey"] = v, key
+            if kind in ("int", "float"):
+                acc["sum"] += v
+                if acc["values"] is not None:
+                    acc["values"].append(v)
+    out = []
+    for i, acc in zip(indices, accs):
+        kind = table.kinds[i]
         record: dict = {
             "column": table.columns[i],
             "type": kind,
-            "count": len(values),
-            "nulls": nulls,
-            "distinct": len(counts),
-            "min": None,
-            "max": None,
+            "count": acc["n"],
+            "nulls": acc["nulls"],
+            "distinct": len(acc["counts"]),
+            "min": acc["lo"],
+            "max": acc["hi"],
             "mean": None,
         }
         if top > 0:
             record["top"] = [
-                {"value": v, "count": n} for v, n in counts.most_common(top)
+                {"value": v, "count": n} for v, n in acc["counts"].most_common(top)
             ]
-        if values:
-            keyed = [_sort_value(v, "text") if isinstance(v, str) else v for v in values]
-            lo = min(range(len(values)), key=keyed.__getitem__)
-            hi = max(range(len(values)), key=keyed.__getitem__)
-            record["min"], record["max"] = values[lo], values[hi]
-            if kind in ("int", "float"):
-                record["mean"] = sum(values) / len(values)
-                if bins > 0:
-                    record["hist"] = histogram(values, bins)
+        if acc["n"] and kind in ("int", "float"):
+            record["mean"] = acc["sum"] / acc["n"]
+            if acc["values"]:
+                record["hist"] = histogram(acc["values"], bins)
         out.append(record)
     return out
 
@@ -194,36 +207,53 @@ def group_by(
     Null cells are skipped by every aggregate except a bare ``count``, which
     counts rows. A null key forms its own group (shown as an empty cell).
     """
-    groups: dict[tuple, list[list[str]]] = {}
+    # ``rows`` may be any iterable: each group keeps one small accumulator per
+    # aggregate (count, running sum, best value, distinct set), not its rows.
+    names = [agg_name(table, f, i) for f, i in aggs]
+    groups: dict[tuple, list] = {}
     for row in rows:
         key = tuple("" if is_null(row[i]) else row[i].strip() for i in key_indices)
-        groups.setdefault(key, []).append(row)
-    names = [agg_name(table, f, i) for f, i in aggs]
+        state = groups.get(key)
+        if state is None:
+            state = groups[key] = [0] + [
+                {"n": 0, "sum": 0, "best": None, "bestkey": None, "set": set()}
+                for _ in aggs
+            ]
+        state[0] += 1
+        for acc, (func, idx) in zip(state[1:], aggs):
+            if idx is None or is_null(row[idx]):
+                continue
+            v = convert(row[idx], table.kinds[idx])
+            acc["n"] += 1
+            if func == "distinct":
+                acc["set"].add(_distinct_key(v))
+            elif func in ("sum", "mean"):
+                acc["sum"] += v
+            elif func in ("min", "max"):
+                k = _sort_value(v, "text") if isinstance(v, str) else v
+                if acc["bestkey"] is None or (k < acc["bestkey"] if func == "min" else k > acc["bestkey"]):
+                    acc["best"], acc["bestkey"] = v, k
     out = []
-    for key, members in groups.items():
+    for key, state in groups.items():
         rec: dict = {}
         for i, cell in zip(key_indices, key):
             value = convert(cell, table.kinds[i]) if cell else None
             rec[table.columns[i]] = value
-        for name, (func, idx) in zip(names, aggs):
+        for name, (func, idx), acc in zip(names, aggs, state[1:]):
             if idx is None:
-                rec[name] = len(members)
-                continue
-            vals = [convert(r[idx], table.kinds[idx]) for r in members if not is_null(r[idx])]
-            if func == "count":
-                rec[name] = len(vals)
+                rec[name] = state[0]
+            elif func == "count":
+                rec[name] = acc["n"]
             elif func == "distinct":
-                rec[name] = len({_distinct_key(v) for v in vals})
-            elif not vals:
+                rec[name] = len(acc["set"])
+            elif not acc["n"]:
                 rec[name] = None
             elif func == "sum":
-                rec[name] = sum(vals)
+                rec[name] = acc["sum"]
             elif func == "mean":
-                rec[name] = sum(vals) / len(vals)
+                rec[name] = acc["sum"] / acc["n"]
             else:
-                keyed = [_sort_value(v, "text") if isinstance(v, str) else v for v in vals]
-                pick = min if func == "min" else max
-                rec[name] = vals[pick(range(len(vals)), key=keyed.__getitem__)]
+                rec[name] = acc["best"]
         out.append(rec)
     return out
 

@@ -51,8 +51,8 @@ tablepeek completion {bash,zsh,fish}
 | `--out-delimiter C` | delimiter for `-f csv` output (default comma; `tab`, `semicolon`, `pipe` also accepted) |
 | `--max-width N` | clip table cells wider than N characters (default 40, `0` = never) |
 
-`head`, `filter` and `select` also take `--stream` (see "Streaming large
-files").
+`head`, `filter`, `select`, `stats` and `group` also take `--stream` (see
+"Streaming large files").
 
 The row commands (`head`, `filter`, `sort`, `select`) share these options, so
 one command can filter, sort and pick columns at once:
@@ -462,7 +462,7 @@ mixed.csv: 5 rows, 3 columns, delimiter comma, encoding utf-8
 
 ## Streaming large files
 
-`head`, `filter` and `select` accept `--stream`. The file is then read row by
+`head`, `filter`, `select`, `stats` and `group` accept `--stream`. The file is then read row by
 row instead of being loaded into memory, and reading stops as soon as `-n`
 rows have been produced. Column types come from the first `--sample N` rows
 (default 1000), with the same warning as above for later values that do not
@@ -483,6 +483,28 @@ $ tablepeek filter big.csv "city=Nice and amount>970" -n 2 --stream
 That command returned in about 0.13 s on a Windows laptop because it stopped
 after the second match; `--count --stream` has to read every row (about 9 s
 for the same file, 4776 matches) but keeps only the sample rows in memory, not the file.
+
+`stats` and `group` take `--stream` too. They keep running totals instead of
+the rows, so memory grows with the number of groups or distinct values, not
+with the number of rows (`--hist` still keeps the numeric values of the
+columns it draws). Output is identical to the normal mode. Real output on a
+generated 1,000,000-row, 19 MB file (about 8 s and 6.5 s on a Windows laptop):
+
+```text
+$ tablepeek group big.csv city -a count,mean:amount,max:amount --stream
+city    count  mean_amount  max_amount
+-----  ------  -----------  ----------
+Lyon   200000       249.75       498.5
+Nice   200000       250.75       499.5
+Lille  200000       249.25         498
+Brest  200000       250.25         499
+Paris  200000       248.75       497.5
+
+$ tablepeek stats big.csv -c amount --stream
+column  type     count  nulls  distinct  min    max    mean
+------  -----  -------  -----  --------  ---  -----  ------
+amount  float  1000000      0      1000    0  499.5  249.75
+```
 
 ## How detection works
 

@@ -21,6 +21,12 @@ from tablepeek.table import (
 
 PROG = "tablepeek"
 
+STREAM_SUMMARY_HELP = (
+    "read the file row by row; memory grows with the number of groups or "
+    "distinct values, not the number of rows (types come from the first "
+    "--sample rows, default 1000; slash dates are not converted)"
+)
+
 
 def _positive_int(text: str) -> int:
     try:
@@ -154,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--bins", type=_positive_int, default=8, metavar="N",
         help="number of histogram bins (default 8)",
     )
+    p.add_argument("--stream", action="store_true", help=STREAM_SUMMARY_HELP)
 
     p = add("group", "aggregate rows grouped by columns",
             ["group data.csv city", "group data.csv city,active -a count,mean:score,max:age"],
@@ -166,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("-w", "--where", metavar="EXPR", help="group only rows matching EXPR")
     p.add_argument("-n", "--limit", type=_positive_int, metavar="N", help="output at most N groups")
+    p.add_argument("--stream", action="store_true", help=STREAM_SUMMARY_HELP)
 
     p = add("filter", "rows matching an expression",
             ["filter data.csv \"age>30 and city=Paris\"",
@@ -324,9 +332,46 @@ def _schema_command(args, table: Table) -> str:
     return _describe(table) + body if args.format == "table" else body
 
 
-def _stats_command(args, table: Table) -> str:
-    rows = table.rows
-    if args.where:
+def _summary_stream(args):
+    """Open a stream for stats/group; returns (stream, table)."""
+    stream = open_stream(
+        args.file,
+        delimiter=args.delimiter,
+        encoding=args.encoding,
+        header=not args.no_header,
+        skip=args.skip,
+        null_tokens=args.null_tokens,
+        decimal_comma=args.decimal_comma,
+        sample=args.sample if args.sample is not None else STREAM_SAMPLE,
+    )
+    return stream, stream.table
+
+
+def _run_summary_stream(args) -> str:
+    """Run stats/group over a row stream so the file is never held in memory."""
+    stream, table = _summary_stream(args)
+    try:
+        rows = iter(stream)
+        if args.where:
+            pred = compile_filter(args.where, table)
+            rows = (r for r in rows if pred(r))
+        if args.command == "stats":
+            text = _stats_command(args, table, rows)
+        else:
+            text = _group_command(args, table, rows)
+    finally:
+        stream.close()
+    if table.long_rows:
+        _warn(f"{table.long_rows} row(s) had more fields than the header; extra fields ignored")
+    for message in stream.warnings():
+        _warn(message)
+    return text
+
+
+def _stats_command(args, table: Table, rows=None) -> str:
+    if rows is None:
+        rows = table.rows
+    if args.where and rows is table.rows:
         pred = compile_filter(args.where, table)
         rows = [r for r in rows if pred(r)]
     indices = table.resolve_list(args.columns) if args.columns else None
@@ -370,9 +415,10 @@ def _hist_block(name: str, bins: list[dict]) -> str:
     return "".join(lines)
 
 
-def _group_command(args, table: Table) -> str:
-    rows = table.rows
-    if args.where:
+def _group_command(args, table: Table, rows=None) -> str:
+    if rows is None:
+        rows = table.rows
+    if args.where and rows is table.rows:
         pred = compile_filter(args.where, table)
         rows = [r for r in rows if pred(r)]
     keys = table.resolve_list(args.keys)
@@ -409,19 +455,22 @@ def main(argv: list[str] | None = None) -> int:
         _write(generate(args.shell, parser, PROG))
         return 0
     try:
-        if getattr(args, "stream", False):
+        if getattr(args, "stream", False) and args.command in ("stats", "group"):
+            text = _run_summary_stream(args)
+        elif getattr(args, "stream", False):
             for chunk in _stream_command(args):
                 _write(chunk)
             return 0
-        table = _load(args)
-        if args.command == "schema":
-            text = _schema_command(args, table)
-        elif args.command == "group":
-            text = _group_command(args, table)
-        elif args.command == "stats":
-            text = _stats_command(args, table)
         else:
-            text = _rows_command(args, table)
+            table = _load(args)
+            if args.command == "schema":
+                text = _schema_command(args, table)
+            elif args.command == "group":
+                text = _group_command(args, table)
+            elif args.command == "stats":
+                text = _stats_command(args, table)
+            else:
+                text = _rows_command(args, table)
     except TableError as exc:
         print(f"{PROG}: error: {exc}", file=sys.stderr)
         return 2
